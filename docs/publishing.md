@@ -1,6 +1,6 @@
 # Publishing Shiphook to npm (first-time guide)
 
-This guide walks you through publishing the **shiphook** package to npm using GitHub Actions. You do not need to run `npm publish` on your machine — the workflow runs when you create a **Release** on GitHub.
+This guide walks you through publishing the **shiphook** package to npm using GitHub Actions. You do not run `npm publish` locally — **merging (or pushing) to the `main` branch** triggers the publish workflow and publishes the version in `package.json` to npm.
 
 ---
 
@@ -73,45 +73,38 @@ If any command fails, fix it before creating the release. The same steps run in 
 
 ---
 
-## Step 5: Bump the version (if you want a specific version)
+## Step 5: Bump the version (release flow)
 
-The workflow publishes whatever **version** is in `package.json` at the time of the release.
+The workflow publishes whatever **version** is in `package.json` when you push to `main`. CI (on both **dev** and **main**) fails if that version is **already published** to npm, so you must bump before merging to main.
 
-- For the **first** publish, `0.1.0` is fine — no change needed.
-- For **later** releases, bump the version before (or when) you create the release:
+Use the built-in scripts (they bump, commit, and create a git tag):
 
 ```bash
-npm version patch   # 0.1.0 → 0.1.1
+npm run version:patch   # 0.1.0 → 0.1.1
 # or
-npm version minor   # 0.1.0 → 0.2.0
+npm run version:minor   # 0.1.0 → 0.2.0
 # or
-npm version major   # 0.1.0 → 1.0.0
+npm run version:major   # 0.1.0 → 1.0.0
 ```
 
-Then push the updated `package.json` (and `package-lock.json` if it changed):
+Then push the commit and the new tag to **dev**, then merge **dev** into **main**:
 
 ```bash
-git add package.json package-lock.json
-git commit -m "chore: bump version to 0.1.1"
 git push origin dev
+git push origin dev --tags
+# Then open a PR dev → main, merge. The push to main triggers the publish workflow.
 ```
 
 ---
 
-## Step 6: Create a GitHub Release (this triggers the publish)
+## Step 6: Merge to main (this triggers the publish)
 
-1. On GitHub, open your repo → **Releases** (right-hand side, or **Code** tab → link under “Releases”).
-2. Click **Create a new release** (or **Draft a new release**).
-3. **Choose a tag:**
-   - Click **Choose a tag**.
-   - Type a new tag, e.g. `v0.1.0`, and click **Create new tag: v0.1.0**.
-   - Select the tag to base it on: usually the branch you just pushed (e.g. `dev` or `main`).
-4. **Release title:** e.g. `v0.1.0` or `Shiphook 0.1.0`.
-5. **Description:** optional; you can add short release notes.
-6. Leave **Set as the latest release** checked.
-7. Click **Publish release**.
+1. On **dev**, bump the version (Step 5), push, and push tags.
+2. Open a **Pull Request** from **dev** into **main** (or merge **dev** into **main**).
+3. **Merge** the PR (or push to main).
 
-As soon as the release is published, GitHub Actions runs the **Publish to npm** workflow. It will:
+
+As soon as **main** is updated, GitHub Actions runs the **Publish to npm** workflow. It will:
 
 - Check out the code
 - Install dependencies
@@ -119,11 +112,13 @@ As soon as the release is published, GitHub Actions runs the **Publish to npm** 
 - Build
 - Run `npm publish --access public` using `NPM_TOKEN`
 
+**CI** runs on every push and PR to **dev** and **main**. It **fails** if the version in `package.json` is already published to npm, so you must run `npm run version:patch` (or minor/major) before merging to main.
+
 ---
 
 ## Step 7: Check that it worked
 
-1. **Actions tab:** In your repo, open **Actions**. You should see the workflow **Publish to npm** running (or completed). Click it to see logs; if something failed, the logs will show the error.
+1. **Actions tab:** In your repo, open **Actions**. You should see **Publish to npm** running (or completed) after the merge to main. Click it to see logs; if something failed, the logs will show the error.
 2. **npm:** Open [https://www.npmjs.com/package/shiphook](https://www.npmjs.com/package/shiphook). After a minute or two, the new version should appear.
 
 If the name **shiphook** is already taken on npm, the publish will fail with a “package name already exists” error. In that case you can use a scoped name (e.g. `@cap-jmk-real/shiphook`) by changing the `name` in `package.json` and publishing again; the first publish for a scoped package also needs `--access public`.
@@ -137,8 +132,8 @@ If the name **shiphook** is already taken on npm, the publish will fail with a �
 - [ ] **NPM_TOKEN** added in GitHub → Settings → Secrets and variables → Actions
 - [ ] `npm run build` and `npm run test` pass locally (optional)
 - [ ] Version in `package.json` is what you want (e.g. `0.1.0` for first release)
-- [ ] Code pushed to the branch you will tag (e.g. `dev`)
-- [ ] New release created with a tag (e.g. `v0.1.0`) and **Publish release** clicked
+- [ ] On **dev**: bumped version if needed (`npm run version:patch`), pushed and pushed tags
+- [ ] Merged **dev** into **main** (or pushed to main)
 - [ ] Check **Actions** and **npm** to confirm publish succeeded
 
 ---
@@ -148,6 +143,7 @@ If the name **shiphook** is already taken on npm, the publish will fail with a �
 - **401 / Unauthorized:** NPM_TOKEN is wrong, expired, or missing **Bypass 2FA for publish**. Create a new **Granular Access Token** with read+write for the package and 2FA bypass enabled, then update the GitHub secret.
 - **403 / Forbidden:** Ensure the Granular Access Token has **Read and write** for the package (or “All packages”). If the package is scoped (e.g. `@cap-jmk-real/shiphook`), the first publish must use `--access public` (the workflow already does this for the current `shiphook` name).
 - **Package name already taken:** Use a scoped name in `package.json`, e.g. `"name": "@cap-jmk-real/shiphook"`, then create a new release and publish again.
-- **Workflow not running:** Ensure the trigger is **Release: published**. Draft releases do not trigger it; you must click **Publish release**.
+- **Workflow not running:** The publish workflow runs on **push to `main`**. Merge (or push) to the `main` branch to trigger it.
+- **CI fails with "version already released":** The version in `package.json` is already on npm. Run `npm run version:patch` (or minor/major) on **dev**, commit, push, then merge to main.
 
-For more on the workflow file, see [.github/workflows/publish.yml](https://github.com/cap-jmk-real/shiphook/blob/dev/.github/workflows/publish.yml) in the repo.
+For the workflow file, see [.github/workflows/publish.yml](https://github.com/cap-jmk-real/shiphook/blob/dev/.github/workflows/publish.yml) in the repo.

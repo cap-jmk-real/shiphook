@@ -23,7 +23,10 @@
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "version:patch": "npm version patch -m \"chore: release %s\"",
+    "version:minor": "npm version minor -m \"chore: release %s\"",
+    "version:major": "npm version major -m \"chore: release %s\""
   },
   "keywords": [
     "webhook",
