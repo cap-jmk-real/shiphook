@@ -7,7 +7,15 @@ on:
     branches: [main]
 
 jobs:
+  version_guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version not already released
+        run: node scripts/check-version-not-released.mjs
+
   test:
+    needs: version_guard
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,9 +32,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      - name: Check version not already released
-        run: node scripts/check-version-not-released.mjs
 
       - name: Lint
         run: npm run lint

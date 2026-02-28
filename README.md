@@ -10,6 +10,7 @@ Built for **indie devs**, **micro-SaaS**, and **open-source** projects that want
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/Node-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-0ea5e9?style=flat-square&logo=readthedocs&logoColor=white)](https://cap-jmk-real.github.io/shiphook/)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/cap-jmk-real/shiphook?style=flat-square&utm_source=oss&utm_medium=github&utm_campaign=cap-jmk-real%2Fshiphook&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
 
 ---
 

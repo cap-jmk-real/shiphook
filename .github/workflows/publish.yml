@@ -1,14 +1,22 @@
+# Runs only after CI workflow has completed successfully on main (all 3 OS checks passed).
+# Publishes from the same commit that passed CI.
 name: Publish to npm
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
 
 jobs:
   publish:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout commit that passed CI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -19,9 +27,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      - name: Test
-        run: npm run test
 
       - name: Build
         run: npm run build
