@@ -1,5 +1,4 @@
-# Runs only after CI workflow has completed successfully on main (all 3 OS checks passed).
-# Publishes from the same commit that passed CI.
+# Runs only after CI succeeds on a *push* to main (merge). Not on PR updates.
 name: Publish to npm
 
 on:
@@ -10,7 +9,7 @@ on:
 
 jobs:
   publish:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout commit that passed CI

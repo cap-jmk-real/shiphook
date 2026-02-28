@@ -1,0 +1,7 @@
+# CodeRabbit: auto review PRs targeting main.
+# Docs: https://docs.coderabbit.ai/configure-coderabbit
+reviews:
+  auto_review:
+    enabled: true
+    # Review PRs that target main (in addition to default branch)
+    base_branches: ["main"]
