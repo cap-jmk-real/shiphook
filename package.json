@@ -28,7 +28,8 @@
     "lint": "tsc --noEmit",
     "version:patch": "npm version patch -m \"chore: release %s\"",
     "version:minor": "npm version minor -m \"chore: release %s\"",
-    "version:major": "npm version major -m \"chore: release %s\""
+    "version:major": "npm version major -m \"chore: release %s\"",
+    "ci:local": "node scripts/check-version-not-released.mjs && npm run lint && npm run test && npm run build"
   },
   "keywords": [
     "webhook",
