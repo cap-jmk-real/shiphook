@@ -1,0 +1,13 @@
+{
+  "name": "shiphook-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "dev": "vitepress dev"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.0"
+  }
+}

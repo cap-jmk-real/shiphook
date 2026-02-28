@@ -1,0 +1,51 @@
+{
+  "name": "shiphook",
+  "version": "0.1.0",
+  "description": "Ship on hook — receive a webhook, pull latest, run your deploy script. Self-hosted deploys for indie devs and micro-SaaS. No vendor lock-in.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cap-jmk-real/shiphook.git"
+  },
+  "homepage": "https://github.com/cap-jmk-real/shiphook#readme",
+  "bugs": { "url": "https://github.com/cap-jmk-real/shiphook/issues" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "shiphook": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "webhook",
+    "deploy",
+    "deployment",
+    "git",
+    "pull",
+    "indie",
+    "micro-saas",
+    "ci",
+    "automation",
+    "self-hosted"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
