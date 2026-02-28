@@ -1,13 +1,15 @@
 {
   "name": "shiphook",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ship on hook — receive a webhook, pull latest, run your deploy script. Self-hosted deploys for indie devs and micro-SaaS. No vendor lock-in.",
   "repository": {
     "type": "git",
     "url": "https://github.com/cap-jmk-real/shiphook.git"
   },
   "homepage": "https://github.com/cap-jmk-real/shiphook#readme",
-  "bugs": { "url": "https://github.com/cap-jmk-real/shiphook/issues" },
+  "bugs": {
+    "url": "https://github.com/cap-jmk-real/shiphook/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
