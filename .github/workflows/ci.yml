@@ -19,10 +19,9 @@ jobs:
       - name: Check version not already released
         run: node scripts/check-version-not-released.mjs
 
-  # Only runs when version_guard succeeds. Avoids spinning up 3 runners when version is already released.
+  # Skipped when version_guard fails (needs: version_guard).
   test:
     needs: version_guard
-    if: success()
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
