@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 jobs:
+  # Run version check once on Ubuntu only. If it fails, test matrix is skipped (no Windows/macOS runners).
   version_guard:
     runs-on: ubuntu-latest
     steps:
@@ -14,8 +15,10 @@ jobs:
       - name: Check version not already released
         run: node scripts/check-version-not-released.mjs
 
+  # Only runs when version_guard succeeds. Avoids spinning up 3 runners when version is already released.
   test:
     needs: version_guard
+    if: success()
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
