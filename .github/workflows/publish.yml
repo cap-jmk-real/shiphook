@@ -1,14 +1,21 @@
+# Runs only after CI succeeds on a *push* to main (merge). Not on PR updates.
 name: Publish to npm
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
 
 jobs:
   publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout commit that passed CI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -19,9 +26,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      - name: Test
-        run: npm run test
 
       - name: Build
         run: npm run build

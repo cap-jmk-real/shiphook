@@ -6,11 +6,28 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  NODE_VERSION: "22"
+
 jobs:
+  # Run version check once on Ubuntu only. If it fails, test matrix is skipped (no Windows/macOS runners).
+  version_guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check version not already released
+        run: node scripts/check-version-not-released.mjs
+
+  # Skipped when version_guard fails (needs: version_guard).
   test:
+    needs: version_guard
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
@@ -19,14 +36,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
 
       - name: Install
         run: npm ci
-
-      - name: Check version not already released
-        run: node scripts/check-version-not-released.mjs
 
       - name: Lint
         run: npm run lint
