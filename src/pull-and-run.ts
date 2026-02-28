@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { exec } from "node:child_process";
+import { parse as shellParse } from "shell-quote";
 
 const execAsync = promisify(exec);
 
@@ -64,49 +65,70 @@ export async function pullAndRun(
   return result;
 }
 
-/** Splits a script string into [command, args]. Empty string yields ["npm", ["run", "deploy"]]. */
+/**
+ * Parses a script string with shell-aware quoting (e.g. preserves node -e "console.log('hi')")
+ * into [command, args]. Empty string yields ["npm", ["run", "deploy"]].
+ */
 function parseScript(script: string): [string, string[]] {
   const trimmed = script.trim();
   if (!trimmed) return ["npm", ["run", "deploy"]];
-  const parts = trimmed.split(/\s+/);
+  const parts = shellParse(trimmed).filter((p): p is string => typeof p === "string");
+  if (parts.length === 0) return ["npm", ["run", "deploy"]];
   return [parts[0], parts.slice(1)];
 }
 
 /**
- * Spawns command with args in cwd, pipes stdout/stderr into result, and resolves with exit code
- * (or null on spawn error).
+ * Spawns command with args in cwd (shell: false so exit codes propagate and args are not
+ * interpreted by a shell), pipes stdout/stderr into result, and resolves with exit code
+ * (or null on spawn error or timeout). Optional timeout kills the child and resolves null.
  */
 function runCommand(
   command: string,
   args: string[],
   cwd: string,
-  result: PullAndRunResult
+  result: PullAndRunResult,
+  timeoutMs: number = 60_000
 ): Promise<number | null> {
   return new Promise((resolve) => {
-    // Avoid shell so exit codes propagate reliably on all platforms
-    const useShell = command !== "node" && command !== "node.exe";
     const child = spawn(command, args, {
       cwd,
-      shell: useShell,
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const settle = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      result.runStdout = stdout;
+      result.runStderr = stderr;
+      resolve(code);
+    };
+    let timeoutId: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+      timeoutId = undefined;
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      const msg = `run script timed out after ${timeoutMs}ms`;
+      result.runStderr = stderr + msg;
+      result.error = (result.error ?? "") + msg;
+      resolve(null);
+    }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
-    child.on("close", (code, signal) => {
-      result.runStdout = stdout;
-      result.runStderr = stderr;
-      resolve(code);
+    child.on("close", (code) => {
+      settle(code);
     });
     child.on("error", (err) => {
       result.runStderr += err.message;
       result.error = (result.error ?? "") + err.message;
-      resolve(null);
+      settle(null);
     });
   });
 }

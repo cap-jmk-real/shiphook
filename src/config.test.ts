@@ -44,6 +44,12 @@ describe("loadConfig", () => {
     expect(config.port).toBe(4000);
   });
 
+  it("rejects malformed SHIPHOOK_PORT and uses default", () => {
+    process.env.SHIPHOOK_PORT = "5000abc";
+    const config = loadConfig(process.env);
+    expect(config.port).toBe(3141);
+  });
+
   it("reads SHIPHOOK_REPO_PATH and SHIPHOOK_RUN_SCRIPT", () => {
     process.env.SHIPHOOK_REPO_PATH = "/app/repo";
     process.env.SHIPHOOK_RUN_SCRIPT = "pnpm deploy";

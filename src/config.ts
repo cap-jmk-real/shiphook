@@ -122,8 +122,10 @@ export function loadConfig(
   }
   base = applyDefaults(base, cwd);
 
-  const envPort = env.SHIPHOOK_PORT ? parseInt(env.SHIPHOOK_PORT, 10) : undefined;
-  const port = env.SHIPHOOK_PORT && isValidPort(envPort) ? envPort! : base.port ?? DEFAULT_PORT;
+  const portRaw = env.SHIPHOOK_PORT;
+  const strictlyNumeric = typeof portRaw === "string" && /^\d+$/.test(portRaw);
+  const envPort = strictlyNumeric ? parseInt(portRaw, 10) : undefined;
+  const port = strictlyNumeric && isValidPort(envPort) ? envPort! : base.port ?? DEFAULT_PORT;
   return {
     port,
     repoPath: nonEmptyString(env.SHIPHOOK_REPO_PATH) ? env.SHIPHOOK_REPO_PATH : (base.repoPath ?? cwd),
