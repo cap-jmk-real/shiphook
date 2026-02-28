@@ -1,8 +1,11 @@
+# Deploys VitePress docs to GitHub Pages.
+# One-time setup: repo Settings → Pages → Source = "GitHub Actions".
+# https://github.com/cap-jmk-real/shiphook/settings/pages
 name: Docs (GitHub Pages)
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
