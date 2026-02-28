@@ -1,7 +1,7 @@
 {
   "name": "shiphook",
-  "version": "0.1.2",
-  "description": "Ship on hook — receive a webhook, pull latest, run your deploy script. Self-hosted deploys for indie devs and micro-SaaS. No vendor lock-in.",
+  "version": "0.2.0",
+  "description": "Ship on hook. Webhook-triggered deploy runner: POST → git pull → run your script. Configure via shiphook.yaml or env. Self-hosted for indie devs and micro-SaaS. No vendor lock-in.",
   "repository": {
     "type": "git",
     "url": "https://github.com/cap-jmk-real/shiphook.git"
@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "shiphook.example.yaml"
   ],
   "scripts": {
     "build": "tsc",
@@ -48,9 +49,13 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {},
+  "dependencies": {
+    "shell-quote": "^1.8",
+    "yaml": "^2.7"
+  },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/shell-quote": "^1.7.5",
     "typescript": "^5.7",
     "vitest": "^2.1"
   }

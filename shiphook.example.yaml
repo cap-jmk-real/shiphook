@@ -1,0 +1,7 @@
+# Example deployment config. Copy to shiphook.yaml and adjust.
+# Env vars (SHIPHOOK_*) override these values.
+port: 3141
+repoPath: .          # or absolute path, e.g. /var/www/my-app
+runScript: npm run deploy
+# secret: your-webhook-secret   # optional
+path: /

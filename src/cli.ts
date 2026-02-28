@@ -2,6 +2,7 @@
 import { loadConfig } from "./config.js";
 import { createShiphookServer } from "./server.js";
 
+/** Loads config (env + YAML), starts the webhook server, and logs listen URL and settings. */
 function main() {
   const config = loadConfig();
   const server = createShiphookServer(config);

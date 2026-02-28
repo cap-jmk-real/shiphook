@@ -7,8 +7,8 @@ Shiphook is triggered by an **HTTP POST** to its URL. You configure your Git hos
 ## What Shiphook expects
 
 - **Method:** `POST`
-- **URL:** Your Shiphook base URL + path (e.g. `http://your-server:3141/` or `http://your-server:3141/webhook` if `SHIPHOOK_PATH=/webhook`)
-- **Optional auth:** If `SHIPHOOK_SECRET` is set, include it in one of:
+- **URL:** Your Shiphook base URL + path (e.g. `http://your-server:3141/` or `http://your-server:3141/webhook` if you set `path: /webhook` in **shiphook.yaml** or `SHIPHOOK_PATH=/webhook`)
+- **Optional auth:** If a secret is set (in **shiphook.yaml** or `SHIPHOOK_SECRET`), include it in one of:
   - Header: `X-Shiphook-Secret: <secret>`
   - Header: `Authorization: Bearer <secret>`
 

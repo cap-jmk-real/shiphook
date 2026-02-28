@@ -1,6 +1,6 @@
 # Shiphook
 
-**Ship on hook.** One webhook, one command. Receive a POST → `git pull` → run your deploy script. No SaaS, no YAML, no containers. Just Node and your repo.
+**Ship on hook.** One webhook, one command. Receive a POST → `git pull` → run your deploy script. Configure the deployment via **YAML** or env vars. No SaaS, no containers. Just Node and your repo.
 
 Built for **indie devs**, **micro-SaaS**, and **open-source** projects that want simple, self-hosted deploys.
 
@@ -38,19 +38,21 @@ It runs `git pull` in the repo, then your script (default: `npm run deploy`). Re
 ## Why Shiphook?
 
 - **No vendor lock-in** — Your server, your script, your Git. No third-party deploy service.
-- **One binary, zero config** — Env vars only. Run it and point your Git webhook at it.
+- **YAML or env** — Put `shiphook.yaml` in your repo (or set env vars). Env overrides file. Run and point your Git webhook at it.
 - **Fits your stack** — Use `npm run deploy`, `pnpm build`, `./deploy.sh`, or anything else.
 - **Secret-based auth** — Set `SHIPHOOK_SECRET`; send it as `X-Shiphook-Secret` or `Authorization: Bearer <secret>` so only your Git provider can trigger deploys.
 
-## Configuration (env)
+## Configuration (YAML or env)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SHIPHOOK_PORT` | `3141` | Server port. |
-| `SHIPHOOK_REPO_PATH` | current dir | Repo path for `git pull` and script. |
-| `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command run after pull. |
-| `SHIPHOOK_SECRET` | — | If set, request must send this (header or Bearer). |
-| `SHIPHOOK_PATH` | `/` | Webhook path (e.g. `/deploy`). |
+Add a **`shiphook.yaml`** in your repo (see [shiphook.example.yaml](shiphook.example.yaml)) or set env vars. Env overrides the file.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `port` / `SHIPHOOK_PORT` | `3141` | Server port. |
+| `repoPath` / `SHIPHOOK_REPO_PATH` | current dir | Repo path for `git pull` and script. |
+| `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command run after pull. |
+| `secret` / `SHIPHOOK_SECRET` | — | If set, request must send this (header or Bearer). |
+| `path` / `SHIPHOOK_PATH` | `/` | Webhook path (e.g. `/deploy`). |
 
 ## GitHub webhook
 

@@ -13,7 +13,7 @@ Shiphook is a small HTTP server that receives a POST (webhook), runs `git pull` 
 - **Runs** a single command after pull (e.g. `npm run deploy`, `pnpm build`, `./deploy.sh`).
 - **Returns** JSON with pull output, run output, and exit status.
 
-No containers. No YAML pipelines. No third-party deploy service. One process, one script.
+No containers. No third-party deploy service. Configure the deployment in **shiphook.yaml** (or with env vars). One process, one script.
 
 ---
 
@@ -40,7 +40,7 @@ Optional: set `SHIPHOOK_SECRET` and send it in the request (header `X-Shiphook-S
 | Page | Contents |
 |------|----------|
 | [Quick start](./quick-start) | Install, run, first deploy, optional secret. |
-| [Configuration](./config) | All environment variables and programmatic API. |
+| [Configuration](./config) | YAML file (shiphook.yaml), env vars, and programmatic API. |
 | [Webhook setup](./webhooks) | GitHub, GitLab, generic POST; response format. |
 
 ---
