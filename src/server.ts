@@ -2,6 +2,13 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import type { ShiphookConfig } from "./config.js";
 import { pullAndRun } from "./pull-and-run.js";
 
+/**
+ * Creates an HTTP server that accepts POST on config.path, validates optional secret,
+ * and runs git pull + runScript in config.repoPath, returning JSON with pull/run result.
+ *
+ * @param config - Port, path, secret, repoPath, runScript (see ShiphookConfig).
+ * @returns Object with start(), stop(), and listening getter for lifecycle control.
+ */
 export function createShiphookServer(config: ShiphookConfig) {
   const pathNorm = config.path.endsWith("/") ? config.path : config.path + "/";
   const pathMatch = (url: string) => {

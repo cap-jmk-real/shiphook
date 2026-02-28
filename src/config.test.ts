@@ -4,6 +4,15 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+async function withTempDir(callback: (dir: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
+  try {
+    await callback(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 describe("loadConfig", () => {
   const origEnv = process.env;
 
@@ -52,8 +61,7 @@ describe("loadConfig", () => {
   });
 
   it("loads from shiphook.yaml when present", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(
         join(dir, "shiphook.yaml"),
         "port: 4000\nrepoPath: /var/app\nrunScript: pnpm deploy\npath: /deploy\n"
@@ -62,33 +70,29 @@ describe("loadConfig", () => {
       delete process.env.SHIPHOOK_REPO_PATH;
       delete process.env.SHIPHOOK_RUN_SCRIPT;
       delete process.env.SHIPHOOK_PATH;
+      delete process.env.SHIPHOOK_CONFIG;
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(4000);
       expect(config.repoPath).toBe("/var/app");
       expect(config.runScript).toBe("pnpm deploy");
       expect(config.path).toBe("/deploy");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it("env overrides shiphook.yaml", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(join(dir, "shiphook.yaml"), "port: 4000\nrunScript: pnpm deploy\n");
+      delete process.env.SHIPHOOK_CONFIG;
       process.env.SHIPHOOK_PORT = "5000";
       process.env.SHIPHOOK_RUN_SCRIPT = "yarn deploy";
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(5000);
       expect(config.runScript).toBe("yarn deploy");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it("accepts snake_case in shiphook.yaml (repo_path, run_script)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(
         join(dir, "shiphook.yaml"),
         "port: 3000\nrepo_path: /opt/app\nrun_script: yarn build\npath: /hook\n"
@@ -97,19 +101,17 @@ describe("loadConfig", () => {
       delete process.env.SHIPHOOK_REPO_PATH;
       delete process.env.SHIPHOOK_RUN_SCRIPT;
       delete process.env.SHIPHOOK_PATH;
+      delete process.env.SHIPHOOK_CONFIG;
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(3000);
       expect(config.repoPath).toBe("/opt/app");
       expect(config.runScript).toBe("yarn build");
       expect(config.path).toBe("/hook");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it("SHIPHOOK_CONFIG points to custom config file path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(join(dir, "custom.yaml"), "port: 9999\nrunScript: ./deploy.sh\n");
       process.env.SHIPHOOK_CONFIG = "custom.yaml";
       delete process.env.SHIPHOOK_PORT;
@@ -117,39 +119,33 @@ describe("loadConfig", () => {
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(9999);
       expect(config.runScript).toBe("./deploy.sh");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it("ignores invalid YAML syntax and uses defaults", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(join(dir, "shiphook.yaml"), "port: 4000\n  bad: indentation\n");
       delete process.env.SHIPHOOK_PORT;
       delete process.env.SHIPHOOK_REPO_PATH;
       delete process.env.SHIPHOOK_RUN_SCRIPT;
       delete process.env.SHIPHOOK_PATH;
+      delete process.env.SHIPHOOK_CONFIG;
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(3141);
       expect(config.runScript).toBe("npm run deploy");
       expect(config.repoPath).toBe(dir);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it("loads from .shiphook.yml when present", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
-    try {
+    await withTempDir(async (dir) => {
       await writeFile(join(dir, ".shiphook.yml"), "port: 5555\npath: /deploy\n");
       delete process.env.SHIPHOOK_PORT;
       delete process.env.SHIPHOOK_PATH;
+      delete process.env.SHIPHOOK_CONFIG;
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(5555);
       expect(config.path).toBe("/deploy");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 });

@@ -4,19 +4,28 @@ import { exec } from "node:child_process";
 
 const execAsync = promisify(exec);
 
+/** Result of a single pull-and-run execution (git pull + script). */
 export interface PullAndRunResult {
+  /** True only if the run script exited with code 0. */
   success: boolean;
+  /** True if `git pull` completed without throwing. */
   pullSuccess: boolean;
   pullStdout: string;
   pullStderr: string;
   runStdout: string;
   runStderr: string;
   runExitCode: number | null;
+  /** Set when pull or run fails (message or stderr). */
   error?: string;
 }
 
 /**
- * Run `git pull` in repoPath, then execute runScript in the same directory.
+ * Runs `git pull` in repoPath, then executes runScript in the same directory.
+ * If pull fails, the script is still run (e.g. when there is no remote).
+ *
+ * @param repoPath - Working directory for git and the script.
+ * @param runScript - Command string (e.g. "npm run deploy" or "pnpm deploy"); parsed into command + args.
+ * @returns Result with pull/run stdout, stderr, and success flags.
  */
 export async function pullAndRun(
   repoPath: string,
@@ -55,6 +64,7 @@ export async function pullAndRun(
   return result;
 }
 
+/** Splits a script string into [command, args]. Empty string yields ["npm", ["run", "deploy"]]. */
 function parseScript(script: string): [string, string[]] {
   const trimmed = script.trim();
   if (!trimmed) return ["npm", ["run", "deploy"]];
@@ -62,6 +72,10 @@ function parseScript(script: string): [string, string[]] {
   return [parts[0], parts.slice(1)];
 }
 
+/**
+ * Spawns command with args in cwd, pipes stdout/stderr into result, and resolves with exit code
+ * (or null on spawn error).
+ */
 function runCommand(
   command: string,
   args: string[],
