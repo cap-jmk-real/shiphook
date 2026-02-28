@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "shiphook.example.yaml"
   ],
   "scripts": {
     "build": "tsc",
@@ -48,7 +49,9 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yaml": "^2.7"
+  },
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5.7",

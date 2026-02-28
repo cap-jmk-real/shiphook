@@ -65,7 +65,7 @@ By default Shiphook runs `npm run deploy` after pull. Add that script to your `p
 }
 ```
 
-You can use any command: `pnpm deploy`, `./deploy.sh`, `docker compose up -d --build`. Set it with the `SHIPHOOK_RUN_SCRIPT` environment variable (see [Configuration](./config)).
+You can use any command: `pnpm deploy`, `./deploy.sh`, `docker compose up -d --build`. Set it in **shiphook.yaml** (`runScript: ...`) or with the **`SHIPHOOK_RUN_SCRIPT`** env var (see [Configuration](./config)).
 
 ---
 
@@ -93,5 +93,5 @@ Without the correct secret, Shiphook responds with **401 Unauthorized**.
 
 ## Next steps
 
-- [Configuration](./config) — port, repo path, run script, path, and programmatic API.
+- [Configuration](./config) — **shiphook.yaml**, env vars, and programmatic API.
 - [Webhook setup](./webhooks) — configure GitHub, GitLab, or any service that can send a POST.
