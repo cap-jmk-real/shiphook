@@ -6,7 +6,7 @@ Shiphook is configured via a **YAML file** and/or **environment variables**. The
 
 ## Config file: `shiphook.yaml`
 
-In your repo (or the directory you run `shiphook` from), add **`shiphook.yaml`** (or `.shiphook.yaml`, `shiphook.yml`, `.shiphook.yml`). Use it to define port, repo path, run script, path, and optional secret.
+In your repo (or the directory you run `shiphook` from), add **`shiphook.yaml`** (or `.shiphook.yaml`, `shiphook.yml`, `.shiphook.yml`). Use it to define port, repo path, run script, path, and webhook secret.
 
 **Example:**
 
@@ -15,7 +15,7 @@ port: 3141
 repoPath: .                    # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
 path: /
-# secret: your-webhook-secret  # optional; prefer env for secrets
+# secret: your-webhook-secret  # optional; if omitted, CLI auto-generates and persists one
 ```
 
 You can use **camelCase** (`repoPath`, `runScript`) or **snake_case** (`repo_path`, `run_script`).
@@ -33,7 +33,7 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_PORT` | `3141` | TCP port the server listens on. |
 | `SHIPHOOK_REPO_PATH` | (from file or cwd) | Directory where `git pull` and the run script execute. |
 | `SHIPHOOK_RUN_SCRIPT` | (from file or `npm run deploy`) | Command run after `git pull`. |
-| `SHIPHOOK_SECRET` | (none) | If set, every POST must send this via `X-Shiphook-Secret` or `Authorization: Bearer <secret>`. |
+| `SHIPHOOK_SECRET` | (auto) | Secret is always required for matching POSTs. If omitted, the CLI auto-generates and persists it to `.shiphook.secret`. |
 | `SHIPHOOK_PATH` | `/` | URL path that accepts the webhook (e.g. `/deploy`). |
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
 
@@ -88,9 +88,10 @@ You can start the Shiphook server from your own Node.js (ES module) code.
 **Use file + env config (same as CLI):**
 
 ```ts
-import { createShiphookServer, loadConfig } from "shiphook";
+import { createShiphookServer, ensureWebhookSecret, loadConfig } from "shiphook";
 
 const config = loadConfig();
+await ensureWebhookSecret(config);
 const server = createShiphookServer(config);
 await server.start();
 ```
@@ -98,16 +99,30 @@ await server.start();
 **Override config explicitly:**
 
 ```ts
-import { createShiphookServer } from "shiphook";
+import { createShiphookServer, ensureWebhookSecret } from "shiphook";
 
-const server = createShiphookServer({
+const config = {
   port: 3141,
   repoPath: "/app",
   runScript: "npm run deploy",
-  secret: process.env.WEBHOOK_SECRET,
+  secret: process.env.SHIPHOOK_SECRET ?? "",
   path: "/",
-});
+};
+
+await ensureWebhookSecret(config);
+const server = createShiphookServer(config);
 await server.start();
 ```
 
 The server object has `start()`, `stop()`, and a `listening` getter. Config shape matches the YAML keys (camelCase: `repoPath`, `runScript`, etc.).
+
+---
+
+## Deploy logs
+
+For every deploy (webhook POST or `shiphook deploy`), Shiphook writes:
+
+- `.shiphook/logs/<id>.json` (machine-readable)
+- `.shiphook/logs/<id>.log` (human-readable)
+
+The server response includes `log: { id, json, log }` so you can correlate a request to a file.

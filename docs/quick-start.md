@@ -35,18 +35,39 @@ You should see:
 Shiphook listening on http://localhost:3141
   Repo: /path/to/your/repo
   Run:  npm run deploy
+  Auth: required
 ```
 
 Shiphook is now waiting for a POST on port **3141**. Each POST triggers one deploy: `git pull` then your run script.
 
 ---
 
+## Deploy once (manual)
+
+From your repo root:
+
+```bash
+shiphook deploy
+```
+
+---
+## Logs (where to find outputs)
+
+Each deploy writes logs into:
+
+- `.shiphook/logs/<id>.json` (machine-readable)
+- `.shiphook/logs/<id>.log` (human-readable)
+
+The server response includes `log: { id, json, log }` so you can correlate a request to a file.
+
+---
 ## Trigger a deploy
 
 Send an HTTP POST to the Shiphook URL:
 
 ```bash
-curl -X POST http://localhost:3141/
+curl -X POST http://localhost:3141/ \
+  -H "X-Shiphook-Secret: <your-secret>"
 ```
 
 The response is JSON: pull stdout/stderr, run script stdout/stderr, and run exit code. If the run script exits 0, `ok` is `true`.
@@ -69,11 +90,11 @@ You can use any command: `pnpm deploy`, `./deploy.sh`, `docker compose up -d --b
 
 ---
 
-## Optional: secure the webhook with a secret
+## Secure the webhook (secret required)
 
-To ensure only your Git host (e.g. GitHub) can trigger deploys, set a shared secret.
+Shiphook always requires a secret for matching POST requests. Set `SHIPHOOK_SECRET` (or `secret:` in `shiphook.yaml`), or omit it and the CLI will auto-generate one and persist it to `.shiphook.secret` (the generated value is printed on that first server start).
 
-**1. Set the secret when running Shiphook:**
+**1. Use a secret when running Shiphook (optional if you want auto-gen):**
 
 ```bash
 export SHIPHOOK_SECRET=your-random-secret

@@ -3,5 +3,5 @@
 port: 3141
 repoPath: .          # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
-# secret: your-webhook-secret   # optional
+# secret: your-webhook-secret   # optional; if omitted, CLI auto-generates and persists one
 path: /
