@@ -1,0 +1,97 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { PullAndRunResult } from "./pull-and-run.js";
+
+export type DeployLogFiles = {
+  id: string;
+  jsonPathRelativeToRepo: string;
+  textPathRelativeToRepo: string;
+};
+
+function getLogsDir(repoPath: string) {
+  // Stored alongside other shiphook state inside the repo.
+  return join(repoPath, ".shiphook", "logs");
+}
+
+export async function writeDeployLogs(args: {
+  repoPath: string;
+  runScript: string;
+  startedAt: Date;
+  finishedAt: Date;
+  result: PullAndRunResult;
+  // Optional override for deterministic IDs in tests.
+  id?: string;
+}): Promise<DeployLogFiles> {
+  const id = args.id ?? randomUUID();
+  const logsDir = getLogsDir(args.repoPath);
+
+  await mkdir(logsDir, { recursive: true });
+
+  const jsonPathRelativeToRepo = join(".shiphook", "logs", `${id}.json`);
+  const textPathRelativeToRepo = join(".shiphook", "logs", `${id}.log`);
+
+  const jsonAbsPath = join(args.repoPath, jsonPathRelativeToRepo);
+  const textAbsPath = join(args.repoPath, textPathRelativeToRepo);
+
+  const durationMs = Math.max(0, args.finishedAt.getTime() - args.startedAt.getTime());
+
+  const payload = {
+    id,
+    startedAt: args.startedAt.toISOString(),
+    finishedAt: args.finishedAt.toISOString(),
+    durationMs,
+    repoPath: args.repoPath,
+    runScript: args.runScript,
+    ok: args.result.success,
+    pull: {
+      success: args.result.pullSuccess,
+      stdout: args.result.pullStdout,
+      stderr: args.result.pullStderr,
+    },
+    run: {
+      stdout: args.result.runStdout,
+      stderr: args.result.runStderr,
+      exitCode: args.result.runExitCode,
+    },
+    error: args.result.error ?? null,
+  };
+
+  await writeFile(jsonAbsPath, JSON.stringify(payload, null, 2), { encoding: "utf-8", mode: 0o600 });
+
+  const text = [
+    `shiphook deploy log: ${id}`,
+    `startedAt: ${payload.startedAt}`,
+    `finishedAt: ${payload.finishedAt}`,
+    `durationMs: ${payload.durationMs}`,
+    ``,
+    `repoPath: ${payload.repoPath}`,
+    `runScript: ${payload.runScript}`,
+    `ok: ${payload.ok}`,
+    `pull.success: ${payload.pull.success}`,
+    `run.exitCode: ${payload.run.exitCode}`,
+    `error: ${payload.error}`,
+    ``,
+    `--- git pull stdout ---`,
+    payload.pull.stdout,
+    ``,
+    `--- git pull stderr ---`,
+    payload.pull.stderr,
+    ``,
+    `--- run stdout ---`,
+    payload.run.stdout,
+    ``,
+    `--- run stderr ---`,
+    payload.run.stderr,
+    ``,
+  ].join("\n");
+
+  await writeFile(textAbsPath, text, { encoding: "utf-8", mode: 0o600 });
+
+  return {
+    id,
+    jsonPathRelativeToRepo,
+    textPathRelativeToRepo,
+  };
+}
+

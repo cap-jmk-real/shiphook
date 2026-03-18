@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 async function post(
   port: number,
@@ -37,6 +38,7 @@ describe("createShiphookServer", () => {
       repoPath: testDir,
       runScript: "node deploy.js",
       path: "/",
+      secret: "test-secret",
     };
   });
 
@@ -70,11 +72,21 @@ describe("createShiphookServer", () => {
     const server = createShiphookServer({ ...config, port: 3144 });
     await server.start();
     try {
-      const { status, body } = await post(3144, "/");
+      const { status, body } = await post(3144, "/", "test-secret");
       expect(status).toBe(200);
-      const b = body as { ok: boolean; run?: { stdout?: string } };
+      const b = body as { ok: boolean; run?: { stdout?: string }; log?: { id?: string; json?: string } };
       expect(b.ok).toBe(true);
       expect(b.run?.stdout?.trim()).toBe("ok");
+      expect(b.log?.id).toBeDefined();
+      expect(b.log?.json).toBe(`.shiphook/logs/${b.log?.id}.json`);
+
+      const jsonAbsPath = join(testDir, b.log?.json ?? "");
+      const onDisk = JSON.parse((await readFile(jsonAbsPath, "utf-8")).toString()) as {
+        id: string;
+        run: { stdout: string };
+      };
+      expect(onDisk.id).toBe(b.log?.id);
+      expect(onDisk.run.stdout.trim()).toBe("ok");
     } finally {
       await server.stop();
     }

@@ -35,12 +35,29 @@ curl -X POST http://localhost:3141/
 
 It runs `git pull` in the repo, then your script (default: `npm run deploy`). Response is JSON with pull and run output.
 
+## Deploy once (manual)
+
+From your repo root, run:
+
+```bash
+shiphook deploy
+```
+
+## Logs (deploy history)
+
+For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a log file into:
+
+- `.shiphook/logs/<id>.json` (machine-readable)
+- `.shiphook/logs/<id>.log` (human-readable)
+
+The server response includes `log: { id, json, log }` so you can correlate a request to a file.
+
 ## Why Shiphook?
 
 - **No vendor lock-in** — Your server, your script, your Git. No third-party deploy service.
 - **YAML or env** — Put `shiphook.yaml` in your repo (or set env vars). Env overrides file. Run and point your Git webhook at it.
 - **Fits your stack** — Use `npm run deploy`, `pnpm build`, `./deploy.sh`, or anything else.
-- **Secret-based auth** — Set `SHIPHOOK_SECRET`; send it as `X-Shiphook-Secret` or `Authorization: Bearer <secret>` so only your Git provider can trigger deploys.
+- **Secret-based auth (required)** — The server always requires a secret. Set `SHIPHOOK_SECRET` (or `secret:` in `shiphook.yaml`), or omit it and the CLI will auto-generate one and persist it to `.shiphook.secret`. Send it as `X-Shiphook-Secret` or `Authorization: Bearer <secret>`.
 
 ## Configuration (YAML or env)
 
@@ -51,14 +68,14 @@ Add a **`shiphook.yaml`** in your repo (see [shiphook.example.yaml](shiphook.exa
 | `port` / `SHIPHOOK_PORT` | `3141` | Server port. |
 | `repoPath` / `SHIPHOOK_REPO_PATH` | current dir | Repo path for `git pull` and script. |
 | `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command run after pull. |
-| `secret` / `SHIPHOOK_SECRET` | — | If set, request must send this (header or Bearer). |
+| `secret` / `SHIPHOOK_SECRET` | — | Required for auth. If omitted, the CLI auto-generates and persists one in `.shiphook.secret`. |
 | `path` / `SHIPHOOK_PATH` | `/` | Webhook path (e.g. `/deploy`). |
 
 ## GitHub webhook
 
 1. Repo → **Settings** → **Webhooks** → **Add webhook**.
 2. **Payload URL:** `https://your-server:3141/` (or your path).
-3. **Secret:** (optional) Same as `SHIPHOOK_SECRET`.
+3. **Secret:** Same as `SHIPHOOK_SECRET` / `.shiphook.secret`.
 4. **Events:** Push events.
 5. Save. Every push triggers a deploy.
 
@@ -69,9 +86,10 @@ Full docs (install, config, webhooks, programmatic API): **[Documentation](https
 ## Programmatic use
 
 ```ts
-import { createShiphookServer, loadConfig } from "shiphook";
+import { createShiphookServer, ensureWebhookSecret, loadConfig } from "shiphook";
 
 const config = loadConfig();
+await ensureWebhookSecret(config);
 const server = createShiphookServer(config);
 await server.start();
 ```

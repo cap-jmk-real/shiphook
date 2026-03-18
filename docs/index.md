@@ -31,7 +31,7 @@ Shiphook listens on **port 3141** by default. To trigger a deploy, send a POST t
 
 `http://your-server:3141/`
 
-Optional: set `SHIPHOOK_SECRET` and send it in the request (header `X-Shiphook-Secret` or `Authorization: Bearer <secret>`) so only your Git provider can trigger deploys.
+Auth is required: configure `SHIPHOOK_SECRET` (or `shiphook.yaml:secret`) and send it in the request (header `X-Shiphook-Secret` or `Authorization: Bearer <secret>`). If you omit it, the CLI auto-generates a secret and persists it to `.shiphook.secret`.
 
 ---
 
@@ -39,7 +39,7 @@ Optional: set `SHIPHOOK_SECRET` and send it in the request (header `X-Shiphook-S
 
 | Page | Contents |
 |------|----------|
-| [Quick start](./quick-start) | Install, run, first deploy, optional secret. |
+| [Quick start](./quick-start) | Install, run, deploy once, secret-based auth. |
 | [Configuration](./config) | YAML file (shiphook.yaml), env vars, and programmatic API. |
 | [Webhook setup](./webhooks) | GitHub, GitLab, generic POST; response format. |
 
