@@ -4,7 +4,7 @@
   "description": "Ship on hook. Webhook-triggered deploy runner: POST → git pull → run your script. Configure via shiphook.yaml or env. Self-hosted for indie devs and micro-SaaS. No vendor lock-in.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cap-jmk-real/shiphook.git"
+    "url": "git+https://github.com/cap-jmk-real/shiphook.git"
   },
   "homepage": "https://github.com/cap-jmk-real/shiphook#readme",
   "bugs": {
@@ -14,7 +14,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "shiphook": "./dist/cli.js"
+    "shiphook": "dist/cli.js"
   },
   "files": [
     "dist",
