@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix as pathPosix } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PullAndRunResult } from "./pull-and-run.js";
 
@@ -28,8 +28,9 @@ export async function writeDeployLogs(args: {
 
   await mkdir(logsDir, { recursive: true });
 
-  const jsonPathRelativeToRepo = join(".shiphook", "logs", `${id}.json`);
-  const textPathRelativeToRepo = join(".shiphook", "logs", `${id}.log`);
+  // Use POSIX separators so paths in JSON/text are consistent across OSes.
+  const jsonPathRelativeToRepo = pathPosix.join(".shiphook", "logs", `${id}.json`);
+  const textPathRelativeToRepo = pathPosix.join(".shiphook", "logs", `${id}.log`);
 
   const jsonAbsPath = join(args.repoPath, jsonPathRelativeToRepo);
   const textAbsPath = join(args.repoPath, textPathRelativeToRepo);

@@ -34,7 +34,7 @@ describe("loadConfig", () => {
     expect(config.port).toBe(3141);
     expect(config.repoPath).toBe(process.cwd());
     expect(config.runScript).toBe("npm run deploy");
-    expect(config.secret).toBeUndefined();
+    expect(config.secret).toBe("");
     expect(config.path).toBe("/");
   });
 

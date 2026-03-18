@@ -9,8 +9,8 @@ export interface ShiphookConfig {
   repoPath: string;
   /** Command to run after pull (default: "npm run deploy") */
   runScript: string;
-  /** Secret for webhook auth; if set, request must have X-Shiphook-Secret or Authorization: Bearer <secret> */
-  secret?: string;
+  /** Secret for webhook auth; must be a non-empty string */
+  secret: string;
   /** HTTP path for the webhook (default: "/") */
   path: string;
 }
@@ -90,7 +90,7 @@ function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookC
     port: partial.port ?? DEFAULT_PORT,
     repoPath: partial.repoPath ?? cwd,
     runScript: partial.runScript ?? DEFAULT_RUN_SCRIPT,
-    secret: partial.secret,
+    secret: partial.secret ?? "",
     path: partial.path ?? DEFAULT_PATH,
   };
 }
@@ -112,15 +112,16 @@ export function loadConfig(
   const cwd = options?.cwd ?? process.cwd();
   const configPath = env.SHIPHOOK_CONFIG;
   const filePath = findConfigFile(cwd, configPath);
-  let base: Partial<ShiphookConfig> = {};
+  let basePartial: Partial<ShiphookConfig> = {};
   if (filePath) {
     try {
-      base = loadYamlConfig(filePath);
+      basePartial = loadYamlConfig(filePath);
     } catch {
       // Invalid YAML or missing file: ignore, use env only
     }
   }
-  base = applyDefaults(base, cwd);
+
+  const base = applyDefaults(basePartial, cwd);
 
   const portRaw = env.SHIPHOOK_PORT;
   const strictlyNumeric = typeof portRaw === "string" && /^\d+$/.test(portRaw);

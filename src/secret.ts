@@ -30,7 +30,7 @@ export async function ensureWebhookSecret(
   config: ShiphookConfig,
   options?: { secretFileName?: string }
 ): Promise<EnsureSecretResult> {
-  if (nonEmptyString(config.secret)) {
+  if (nonEmptyString(config.secret.trim())) {
     // Best-effort classification: if SHIPHOOK_SECRET env is set, assume env; otherwise yaml.
     // (loadConfig already validated non-empty values.)
     const source: EnsureSecretResult["source"] = process.env.SHIPHOOK_SECRET
@@ -50,6 +50,10 @@ export async function ensureWebhookSecret(
       config.secret = onDisk;
       return { secretFilePath, source: "file" };
     }
+
+    console.warn(
+      `shiphook: existing secret file is empty; generating a new secret at ${secretFilePath}`
+    );
   }
 
   // 32 bytes -> 64 hex chars; URL-safe and header-safe.

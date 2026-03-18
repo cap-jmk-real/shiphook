@@ -11,12 +11,12 @@ import { writeDeployLogs } from "./deploy-logs.js";
  * @returns Object with start(), stop(), and listening getter for lifecycle control.
  */
 export function createShiphookServer(config: ShiphookConfig) {
-  if (typeof config.secret !== "string" || config.secret.length === 0) {
+  const requiredSecret = config.secret.trim();
+  if (!requiredSecret) {
     throw new Error(
       "Shiphook webhook secret is required. Set SHIPHOOK_SECRET or shiphook.yaml:secret (or run the CLI which will generate one)."
     );
   }
-  const requiredSecret = config.secret;
 
   const pathNorm = config.path.endsWith("/") ? config.path : config.path + "/";
   const pathMatch = (url: string) => {
@@ -56,6 +56,10 @@ export function createShiphookServer(config: ShiphookConfig) {
           json: string;
           log: string;
         }
+      | {
+          error: string;
+          details: string;
+        }
       | undefined;
     try {
       const files = await writeDeployLogs({
@@ -70,9 +74,12 @@ export function createShiphookServer(config: ShiphookConfig) {
         json: files.jsonPathRelativeToRepo,
         log: files.textPathRelativeToRepo,
       };
-    } catch {
+    } catch (err) {
       // Logging failure should never prevent the deployment response.
       // The server will still return the pull/run output.
+      const details = err instanceof Error ? err.message : String(err);
+      console.error(`shiphook: failed to write deploy logs: ${details}`);
+      logInfo = { error: "failed to write deploy logs", details };
     }
 
     const body = {

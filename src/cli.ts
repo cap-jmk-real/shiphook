@@ -38,7 +38,8 @@ async function runDeploy() {
   }
 
   console.log(JSON.stringify({ ...result, log }, null, 2));
-  process.exit(result.success ? 0 : 1);
+  // Let stdout flush before exiting.
+  process.exitCode = result.success ? 0 : 1;
 }
 
 /**
@@ -63,8 +64,16 @@ async function main() {
   console.log(`  Repo: ${config.repoPath}`);
   console.log(`  Run:  ${config.runScript}`);
   console.log(`  Auth: required (source: ${source})`);
-  if (source === "generated") console.log(`  Webhook secret: ${config.secret}`);
-  else console.log(`  Webhook secret: loaded (saved at ${secretFilePath})`);
+  if (source === "generated") {
+    console.log(`  Webhook secret: generated and saved at ${secretFilePath}`);
+  } else if (source === "file") {
+    console.log(`  Webhook secret: loaded from ${secretFilePath}`);
+  } else {
+    // For env/yaml, ensureWebhookSecret() does not write a secret file.
+    console.log(
+      `  Webhook secret: loaded from ${source}; secret file path: ${secretFilePath} (not persisted by Shiphook for ${source})`
+    );
+  }
 }
 
 main();

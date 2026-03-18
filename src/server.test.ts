@@ -10,11 +10,13 @@ import { readFile } from "node:fs/promises";
 async function post(
   port: number,
   path: string,
-  secret?: string
+  secret?: string,
+  authorizationBearerSecret?: string
 ): Promise<{ status: number; body: unknown }> {
   const url = new URL(`http://127.0.0.1:${port}${path}`);
   const headers: Record<string, string> = {};
   if (secret) headers["X-Shiphook-Secret"] = secret;
+  if (authorizationBearerSecret) headers["Authorization"] = `Bearer ${authorizationBearerSecret}`;
   const res = await fetch(url.toString(), {
     method: "POST",
     headers,
@@ -104,6 +106,9 @@ describe("createShiphookServer", () => {
       expect(status).toBe(401);
       const { status: status2 } = await post(3145, "/", "required-secret");
       expect(status2).toBe(200);
+
+      const { status: status3 } = await post(3145, "/", undefined, "required-secret");
+      expect(status3).toBe(200);
     } finally {
       await server.stop();
     }

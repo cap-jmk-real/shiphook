@@ -99,15 +99,18 @@ await server.start();
 **Override config explicitly:**
 
 ```ts
-import { createShiphookServer } from "shiphook";
+import { createShiphookServer, ensureWebhookSecret } from "shiphook";
 
-const server = createShiphookServer({
+const config = {
   port: 3141,
   repoPath: "/app",
   runScript: "npm run deploy",
-  secret: process.env.SHIPHOOK_SECRET,
+  secret: process.env.SHIPHOOK_SECRET ?? "",
   path: "/",
-});
+};
+
+await ensureWebhookSecret(config);
+const server = createShiphookServer(config);
 await server.start();
 ```
 

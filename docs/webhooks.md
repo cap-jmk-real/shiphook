@@ -53,12 +53,14 @@ On every push, GitHub sends a POST to that URL. Shiphook runs `git pull` and you
 Any service that can send an HTTP POST works. Example with curl:
 
 ```bash
-curl -X POST http://your-server:3141/
+curl -X POST http://your-server:3141/ \
+  -H "X-Shiphook-Secret: your-secret"
 ```
 
-With a secret:
+You can send the secret via either header:
 
 ```bash
+# Header: X-Shiphook-Secret
 curl -X POST http://your-server:3141/ \
   -H "X-Shiphook-Secret: your-secret"
 ```
@@ -66,6 +68,7 @@ curl -X POST http://your-server:3141/ \
 Or:
 
 ```bash
+# Header: Authorization: Bearer <secret>
 curl -X POST http://your-server:3141/ \
   -H "Authorization: Bearer your-secret"
 ```
@@ -74,7 +77,12 @@ curl -X POST http://your-server:3141/ \
 
 ## What Shiphook returns
 
-Shiphook **always responds with HTTP 200** and a JSON body. The body describes whether the run script succeeded and includes pull and run output.
+Shiphook returns:
+
+- HTTP `200` for **valid authenticated** requests (valid secret)
+- HTTP `401` for **missing/invalid** secrets
+
+In both cases, the response includes a JSON body describing the result.
 
 **Success (run script exited 0):**
 

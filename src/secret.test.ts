@@ -14,6 +14,7 @@ describe("ensureWebhookSecret", () => {
         repoPath: dir,
         runScript: "node deploy.js",
         path: "/",
+        secret: "",
       };
 
       const res1 = await ensureWebhookSecret(config);
@@ -25,7 +26,7 @@ describe("ensureWebhookSecret", () => {
 
       const config2: ShiphookConfig = {
         ...config,
-        secret: undefined,
+        secret: "",
       };
       const res2 = await ensureWebhookSecret(config2);
       expect(res2.source).toBe("file");
