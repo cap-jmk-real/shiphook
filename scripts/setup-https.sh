@@ -297,8 +297,7 @@ install_shiphook_systemd_unit() {
   fi
 
   local unit_path="/etc/systemd/system/shiphook.service"
-  local exec_line wd_q
-  wd_q=$(systemd_quote_arg "$workdir")
+  local exec_line
   exec_line="ExecStart=$(systemd_quote_arg "$node_bin") $(systemd_quote_arg "$cli_js")"
 
   echo ""
@@ -314,7 +313,7 @@ Wants=network-online.target
 Type=simple
 User=${svc_user}
 Group=${svc_group}
-WorkingDirectory=${wd_q}
+WorkingDirectory=${workdir}
 ${exec_line}
 Restart=on-failure
 RestartSec=5s
