@@ -9,6 +9,8 @@ export interface ShiphookConfig {
   repoPath: string;
   /** Command to run after pull (default: "npm run deploy") */
   runScript: string;
+  /** Max time (ms) to allow the runScript to finish before timing out (default: 30 minutes). */
+  runTimeoutMs: number;
   /** Secret for webhook auth; must be a non-empty string */
   secret: string;
   /** HTTP path for the webhook (default: "/") */
@@ -17,9 +19,12 @@ export interface ShiphookConfig {
 
 const DEFAULT_PORT = 3141;
 const DEFAULT_RUN_SCRIPT = "npm run deploy";
+const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const DEFAULT_PATH = "/";
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
+const MIN_RUN_TIMEOUT_MS = 1_000; // 1 second
+const MAX_RUN_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /** Returns true if value is a finite integer in the valid TCP port range (1–65535). */
 function isValidPort(value: unknown): value is number {
@@ -32,6 +37,14 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/** Returns true if value is a finite integer in the valid timeout range. */
+function isValidRunTimeoutMs(value: unknown): value is number {
+  const n = typeof value === "number" ? value : Number(value);
+  return (
+    Number.isFinite(n) && n >= MIN_RUN_TIMEOUT_MS && n <= MAX_RUN_TIMEOUT_MS && Math.floor(n) === n
+  );
+}
+
 const CONFIG_FILES = ["shiphook.yaml", "shiphook.yml", ".shiphook.yaml", ".shiphook.yml"];
 
 /** Raw shape accepted from YAML (camelCase and snake_case). */
@@ -41,6 +54,8 @@ interface YamlConfig {
   repo_path?: string;
   runScript?: string;
   run_script?: string;
+  runTimeoutMs?: number;
+  run_timeout_ms?: number;
   secret?: string;
   path?: string;
 }
@@ -77,6 +92,8 @@ function loadYamlConfig(filePath: string): Partial<ShiphookConfig> {
   if (nonEmptyString(repoPathVal)) result.repoPath = repoPathVal;
   const runScriptVal = data.runScript ?? data.run_script;
   if (nonEmptyString(runScriptVal)) result.runScript = runScriptVal;
+  const timeoutVal = data.runTimeoutMs ?? data.run_timeout_ms;
+  if (isValidRunTimeoutMs(timeoutVal)) result.runTimeoutMs = Math.floor(Number(timeoutVal));
   const secretVal = data.secret;
   if (nonEmptyString(secretVal)) result.secret = secretVal;
   const pathVal = data.path;
@@ -90,6 +107,7 @@ function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookC
     port: partial.port ?? DEFAULT_PORT,
     repoPath: partial.repoPath ?? cwd,
     runScript: partial.runScript ?? DEFAULT_RUN_SCRIPT,
+    runTimeoutMs: partial.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
     secret: partial.secret ?? "",
     path: partial.path ?? DEFAULT_PATH,
   };
@@ -127,10 +145,20 @@ export function loadConfig(
   const strictlyNumeric = typeof portRaw === "string" && /^\d+$/.test(portRaw);
   const envPort = strictlyNumeric ? parseInt(portRaw, 10) : undefined;
   const port = strictlyNumeric && isValidPort(envPort) ? envPort! : base.port ?? DEFAULT_PORT;
+
+  const timeoutRaw = env.SHIPHOOK_RUN_TIMEOUT_MS;
+  const strictlyNumericTimeout = typeof timeoutRaw === "string" && /^\d+$/.test(timeoutRaw);
+  const envTimeout = strictlyNumericTimeout ? parseInt(timeoutRaw, 10) : undefined;
+  const runTimeoutMs =
+    strictlyNumericTimeout && isValidRunTimeoutMs(envTimeout)
+      ? envTimeout!
+      : base.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+
   return {
     port,
     repoPath: nonEmptyString(env.SHIPHOOK_REPO_PATH) ? env.SHIPHOOK_REPO_PATH : (base.repoPath ?? cwd),
     runScript: nonEmptyString(env.SHIPHOOK_RUN_SCRIPT) ? env.SHIPHOOK_RUN_SCRIPT : (base.runScript ?? DEFAULT_RUN_SCRIPT),
+    runTimeoutMs,
     secret: nonEmptyString(env.SHIPHOOK_SECRET) ? env.SHIPHOOK_SECRET : base.secret,
     path: nonEmptyString(env.SHIPHOOK_PATH) ? env.SHIPHOOK_PATH : (base.path ?? DEFAULT_PATH),
   };

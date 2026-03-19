@@ -3,5 +3,8 @@
 port: 3141
 repoPath: .          # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
+# Max time (ms) to allow the deploy command to finish before Shiphook times out.
+# Default: 30 minutes.
+runTimeoutMs: 1800000
 # secret: your-webhook-secret   # optional; if omitted, CLI auto-generates and persists one
 path: /

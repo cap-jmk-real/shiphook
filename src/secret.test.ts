@@ -13,6 +13,7 @@ describe("ensureWebhookSecret", () => {
         port: 0,
         repoPath: dir,
         runScript: "node deploy.js",
+        runTimeoutMs: 1000,
         path: "/",
         secret: "",
       };
@@ -46,6 +47,7 @@ describe("ensureWebhookSecret", () => {
         port: 0,
         repoPath: dir,
         runScript: "node deploy.js",
+        runTimeoutMs: 1000,
         path: "/",
         secret: "env-or-yaml-secret",
       };

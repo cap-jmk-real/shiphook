@@ -47,7 +47,9 @@ export function createShiphookServer(config: ShiphookConfig) {
     res.writeHead(200, { "Content-Type": "application/json" });
 
     const startedAt = new Date();
-    const result = await pullAndRun(config.repoPath, config.runScript);
+    const result = await pullAndRun(config.repoPath, config.runScript, {
+      timeoutMs: config.runTimeoutMs,
+    });
     const finishedAt = new Date();
 
     let logInfo:

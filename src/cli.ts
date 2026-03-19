@@ -116,7 +116,9 @@ async function promptOfferHttpsSetup(): Promise<boolean> {
 async function runDeploy() {
   const config = loadConfig();
   const startedAt = new Date();
-  const result = await pullAndRun(config.repoPath, config.runScript);
+  const result = await pullAndRun(config.repoPath, config.runScript, {
+    timeoutMs: config.runTimeoutMs,
+  });
   const finishedAt = new Date();
 
   let log: { id: string; json: string; log: string } | undefined;
