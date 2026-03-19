@@ -11,7 +11,8 @@ async function post(
   port: number,
   path: string,
   secret?: string,
-  authorizationBearerSecret?: string
+  authorizationBearerSecret?: string,
+  opts?: { asText?: boolean }
 ): Promise<{ status: number; body: unknown }> {
   const url = new URL(`http://127.0.0.1:${port}${path}`);
   const headers: Record<string, string> = {};
@@ -21,7 +22,7 @@ async function post(
     method: "POST",
     headers,
   });
-  const body = await res.json();
+  const body = opts?.asText ? await res.text() : await res.json();
   return { status: res.status, body };
 }
 
@@ -75,7 +76,7 @@ describe("createShiphookServer", () => {
     const server = createShiphookServer({ ...config, port: 3144 });
     await server.start();
     try {
-      const { status, body } = await post(3144, "/", "test-secret");
+      const { status, body } = await post(3144, "/?format=json", "test-secret");
       expect(status).toBe(200);
       const b = body as { ok: boolean; run?: { stdout?: string }; log?: { id?: string; json?: string } };
       expect(b.ok).toBe(true);
@@ -103,13 +104,30 @@ describe("createShiphookServer", () => {
     });
     await server.start();
     try {
-      const { status } = await post(3145, "/");
+      const { status } = await post(3145, "/?format=json");
       expect(status).toBe(401);
-      const { status: status2 } = await post(3145, "/", "required-secret");
+      const { status: status2 } = await post(3145, "/?format=json", "required-secret");
       expect(status2).toBe(200);
 
-      const { status: status3 } = await post(3145, "/", undefined, "required-secret");
+      const { status: status3 } = await post(3145, "/?format=json", undefined, "required-secret");
       expect(status3).toBe(200);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("streams deploy output by default and ends with a [done] line", async () => {
+    const server = createShiphookServer({ ...config, port: 3146 });
+    await server.start();
+    try {
+      const { status, body } = await post(3146, "/", "test-secret", undefined, { asText: true });
+      expect(status).toBe(200);
+      const text = body as string;
+      const trimmed = text.trimEnd();
+      const lastLine = trimmed.split("\n").at(-1) ?? "";
+      expect(lastLine).toMatch(/\[done\]\s+ok=true\s+exitCode=0/);
+      expect(text).toContain("[run] stdout:");
+      expect(text).toContain("ok");
     } finally {
       await server.stop();
     }

@@ -22,6 +22,28 @@ describe("pullAndRun", () => {
     }
   });
 
+  it("reports stdout/stderr to onOutput callback", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    try {
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      await writeFile(join(dir, "deploy.js"), "console.log('deployed');");
+
+      const stdoutChunks: string[] = [];
+      const result = await pullAndRun(dir, "node deploy.js", {
+        onOutput: (phase, stream, data) => {
+          if (phase === "run" && stream === "stdout") stdoutChunks.push(data);
+        },
+      });
+
+      expect(result.runStdout.trim()).toBe("deployed");
+      expect(stdoutChunks.join("").includes("deployed")).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reports failure when run script exits non-zero", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
     try {

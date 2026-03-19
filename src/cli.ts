@@ -297,7 +297,8 @@ async function main() {
       { stdio: "inherit" }
     );
     if (r.status === 0) process.exit(exitCode);
-    console.warn("shiphook: systemd restart failed; continuing.");
+    console.warn("shiphook: systemd restart failed; exiting to avoid port conflicts.");
+    process.exit(1);
   };
 
   const offerHttpsPrompt = shouldOfferHttpsPrompt();

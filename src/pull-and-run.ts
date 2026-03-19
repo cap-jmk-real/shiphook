@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
-import { promisify } from "node:util";
-import { exec } from "node:child_process";
 import { parse as shellParse } from "shell-quote";
 
-const execAsync = promisify(exec);
+export type DeployOutputPhase = "pull" | "run";
+export type DeployOutputStream = "stdout" | "stderr";
+export type DeployOutputCallback = (
+  phase: DeployOutputPhase,
+  stream: DeployOutputStream,
+  data: string
+) => void;
 
 /** Result of a single pull-and-run execution (git pull + script). */
 export interface PullAndRunResult {
@@ -32,7 +36,7 @@ export interface PullAndRunResult {
 export async function pullAndRun(
   repoPath: string,
   runScript: string,
-  options?: { timeoutMs?: number }
+  options?: { timeoutMs?: number; onOutput?: DeployOutputCallback }
 ): Promise<PullAndRunResult> {
   const result: PullAndRunResult = {
     success: false,
@@ -44,25 +48,56 @@ export async function pullAndRun(
     runExitCode: null,
   };
 
-  try {
-    const { stdout: pullStdout, stderr: pullStderr } = await execAsync("git pull", {
+  const onOutput = options?.onOutput;
+
+  let pullStdout = "";
+  let pullStderr = "";
+  const pullExitCode: number | null = await new Promise((resolve) => {
+    const child = spawn("git", ["pull"], {
       cwd: repoPath,
-      encoding: "utf8",
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    result.pullStdout = pullStdout ?? "";
-    result.pullStderr = pullStderr ?? "";
-    result.pullSuccess = true;
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    result.pullStdout = e.stdout ?? "";
-    result.pullStderr = e.stderr ?? "";
-    result.error = e.message ?? String(err);
-    // Still run the script so deploy can proceed (e.g. no remote configured)
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const s = chunk.toString();
+      pullStdout += s;
+      onOutput?.("pull", "stdout", s);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const s = chunk.toString();
+      pullStderr += s;
+      onOutput?.("pull", "stderr", s);
+    });
+
+    child.on("close", (code) => resolve(code ?? null));
+    child.on("error", (err) => {
+      const msg = err.message ?? String(err);
+      pullStderr += msg;
+      onOutput?.("pull", "stderr", msg);
+      result.error = msg;
+      resolve(null);
+    });
+  });
+
+  result.pullStdout = pullStdout;
+  result.pullStderr = pullStderr;
+  result.pullSuccess = pullExitCode === 0;
+  if (!result.pullSuccess && !result.error) {
+    result.error = `git pull failed with exit code ${pullExitCode ?? "null"}`;
   }
+  // Still run the script so deploy can proceed (e.g. no remote configured)
 
   const [cmd, args] = parseScript(runScript);
   const runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
-  const runExitCode = await runCommand(cmd, args, repoPath, result, runTimeoutMs);
+  const runExitCode = await runCommand(
+    cmd,
+    args,
+    repoPath,
+    result,
+    runTimeoutMs,
+    options?.onOutput
+  );
   result.runExitCode = runExitCode;
   result.success = runExitCode === 0;
   return result;
@@ -90,7 +125,8 @@ function runCommand(
   args: string[],
   cwd: string,
   result: PullAndRunResult,
-  timeoutMs: number = 30 * 60 * 1000 // 30 minutes
+  timeoutMs: number = 30 * 60 * 1000, // 30 minutes
+  onOutput?: DeployOutputCallback
 ): Promise<number | null> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -115,22 +151,29 @@ function runCommand(
       settled = true;
       child.kill("SIGTERM");
       const msg = `run script timed out after ${timeoutMs}ms`;
+      onOutput?.("run", "stderr", msg);
       result.runStderr = stderr + msg;
       result.error = (result.error ?? "") + msg;
       resolve(null);
     }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const s = chunk.toString();
+      stdout += s;
+      onOutput?.("run", "stdout", s);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const s = chunk.toString();
+      stderr += s;
+      onOutput?.("run", "stderr", s);
     });
     child.on("close", (code) => {
       settle(code);
     });
     child.on("error", (err) => {
-      result.runStderr += err.message;
-      result.error = (result.error ?? "") + err.message;
+      const msg = err.message ?? String(err);
+      stderr += msg;
+      result.error = (result.error ?? "") + msg;
+      onOutput?.("run", "stderr", msg);
       settle(null);
     });
   });
