@@ -24,6 +24,11 @@ function setupHttpsScriptPath(): string {
   return join(here, "..", "scripts", "setup-https.sh");
 }
 
+/** Persists last-used domain, email, port, path for `shiphook setup-https` / interactive HTTPS in this repo. */
+function httpsSetupDefaultsPath(repoPathAbsolute: string): string {
+  return join(repoPathAbsolute, ".shiphook", "setup-https.defaults");
+}
+
 /** Runs the root setup script via sudo. Pass absolute repo path for systemd WorkingDirectory. */
 function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
   const script = setupHttpsScriptPath();
@@ -33,6 +38,7 @@ function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
   }
   const cliJs = fileURLToPath(import.meta.url);
   const nodeBin = process.execPath;
+  const defaultsFile = httpsSetupDefaultsPath(repoPathAbsolute);
   const r = spawnSync(
     "sudo",
     [
@@ -40,6 +46,7 @@ function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
       `SHIPHOOK_SYSTEMD_WORKING_DIRECTORY=${repoPathAbsolute}`,
       `SHIPHOOK_SYSTEMD_NODE_BIN=${nodeBin}`,
       `SHIPHOOK_SYSTEMD_CLI_JS=${cliJs}`,
+      `SHIPHOOK_HTTPS_DEFAULTS_FILE=${defaultsFile}`,
       "bash",
       script,
     ],

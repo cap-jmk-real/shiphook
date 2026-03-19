@@ -31,6 +31,8 @@ The setup script will **prompt** for:
 | **Local Shiphook port** | Port Shiphook listens on (default `3141`). |
 | **Webhook path** | URL path nginx proxies (default `/`, same as `SHIPHOOK_PATH` / `shiphook.yaml` `path`). |
 
+When you run **`shiphook setup-https`** or interactive **`shiphook`** → HTTPS **`y`** from a repo directory, the CLI passes **`SHIPHOOK_HTTPS_DEFAULTS_FILE`** pointing at **`.shiphook/setup-https.defaults`** in that repo. After a **successful** run, the script **writes** that file (domain, email, port, path); the **next** run **pre-fills** the prompts (press **Enter** to accept). The file is listed in **`.gitignore`** so it stays local (optional: commit a template without secrets if your team wants shared defaults).
+
 **Optional (Debian/Ubuntu only):** if nginx’s default site (`sites-enabled/default`) would interfere with Certbot, you can opt in to removing it by running the setup with `REMOVE_DEFAULT_SITE=1` (e.g. `sudo REMOVE_DEFAULT_SITE=1 bash …/setup-https.sh`). Without that, the script only prints a note and leaves `default` in place so shared servers are not surprised.
 
 The script will:
@@ -64,6 +66,18 @@ If you are not on Linux or prefer manual control:
 2. Configure nginx `proxy_pass` to `http://127.0.0.1:3141` (or your port), preserving the request path and headers (`Host`, `X-Forwarded-Proto`, etc.).
 3. Obtain a certificate: `certbot --nginx -d your.domain ...`
 4. Ensure renewal: `certbot renew` (cron or `certbot.timer`).
+
+---
+
+## SELinux (AlmaLinux, Rocky, RHEL, Fedora, …)
+
+If nginx returns **502** and `/var/log/nginx/error.log` shows **`connect() to 127.0.0.1:3141 failed (13: Permission denied)`**, SELinux is blocking nginx from opening outbound TCP to your Shiphook port. The automated **`setup-https.sh`** enables **`httpd_can_network_connect`** when **`getenforce`** is **Enforcing**. To fix manually:
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+```
+
+Confirm with `getsebool httpd_can_network_connect` (should show **on**). Audit denials look like **`name_connect`** / **`dest=3141`** / **`httpd_t`** → **`unreserved_port_t`**.
 
 ---
 
