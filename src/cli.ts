@@ -219,12 +219,22 @@ async function main() {
   console.log(`  Source: ${colors.white(String(source ?? ""))}`);
   if (source === "generated") {
     console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
-    console.log("");
-    console.log(
-      colors.bold(colors.green("GitHub webhook “Secret” value (copy this once, keep it safe):"))
-    );
-    console.log(`  ${colors.white(String(config.secret ?? ""))}`);
-    console.log("");
+    if (process.stdout.isTTY) {
+      console.log("");
+      console.log(
+        colors.bold(
+          colors.green("GitHub webhook “Secret” value (copy this once, keep it safe):")
+        )
+      );
+      console.log(`  ${colors.white(String(config.secret ?? ""))}`);
+      console.log("");
+    } else {
+      console.log(
+        `  Secret: ${colors.white(
+          "hidden (non-interactive output; read from secret file if needed)"
+        )}`
+      );
+    }
   } else if (source === "file") {
     console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
   } else {
