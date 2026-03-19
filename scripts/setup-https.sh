@@ -64,6 +64,27 @@ maybe_open_firewalld() {
   fi
 }
 
+# RHEL/Alma/Rocky/Fedora: SELinux blocks nginx (httpd_t) from connecting to unreserved ports (e.g. 3141).
+# Without this, nginx error log shows: connect() to 127.0.0.1:PORT failed (13: Permission denied).
+maybe_selinux_httpd_can_network_connect() {
+  if ! command -v getenforce >/dev/null 2>&1; then
+    return 0
+  fi
+  local en
+  en=$(getenforce 2>/dev/null || true)
+  [[ "$en" == "Enforcing" ]] || return 0
+  if ! command -v setsebool >/dev/null 2>&1; then
+    echo "Note: SELinux is Enforcing; if nginx returns 502 to upstream, run: sudo setsebool -P httpd_can_network_connect 1"
+    return 0
+  fi
+  if getsebool httpd_can_network_connect 2>/dev/null | grep -qE '[[:space:]]+on$'; then
+    return 0
+  fi
+  echo "SELinux (Enforcing): enabling httpd_can_network_connect so nginx can proxy to Shiphook on 127.0.0.1…"
+  setsebool -P httpd_can_network_connect 1 ||
+    echo "Warning: setsebool failed; run manually: sudo setsebool -P httpd_can_network_connect 1"
+}
+
 have_systemd() {
   command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
 }
@@ -255,6 +276,8 @@ server {
 }
 EOF
 fi
+
+maybe_selinux_httpd_can_network_connect
 
 nginx -t
 if have_systemd; then

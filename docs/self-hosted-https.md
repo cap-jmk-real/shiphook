@@ -67,6 +67,18 @@ If you are not on Linux or prefer manual control:
 
 ---
 
+## SELinux (AlmaLinux, Rocky, RHEL, Fedora, …)
+
+If nginx returns **502** and `/var/log/nginx/error.log` shows **`connect() to 127.0.0.1:3141 failed (13: Permission denied)`**, SELinux is blocking nginx from opening outbound TCP to your Shiphook port. The automated **`setup-https.sh`** enables **`httpd_can_network_connect`** when **`getenforce`** is **Enforcing**. To fix manually:
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+```
+
+Confirm with `getsebool httpd_can_network_connect` (should show **on**). Audit denials look like **`name_connect`** / **`dest=3141`** / **`httpd_t`** → **`unreserved_port_t`**.
+
+---
+
 ## Security notes
 
 - Shiphook’s HTTP server listens on **all interfaces** by default (not localhost-only). Limit who can reach it: run **behind nginx** (as this guide sets up) and/or use a **host firewall** so only `127.0.0.1` or your proxy can reach the Shiphook port from the network.
