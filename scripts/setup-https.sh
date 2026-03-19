@@ -21,6 +21,7 @@ load_os_release() {
     # shellcheck disable=SC1091
     . /etc/os-release
     OS_ID="${ID:-}"
+    # Reserved from /etc/os-release VERSION_ID for future distro-version-specific tweaks (e.g. package names).
     OS_VERSION_ID="${VERSION_ID:-}"
     OS_PRETTY="${PRETTY_NAME:-${OS_ID:-unknown}}"
     ID_LIKE_VALUE="${ID_LIKE:-}"
@@ -67,7 +68,11 @@ load_os_release
 
 echo "Shiphook HTTPS setup (nginx + Certbot)"
 if [[ -n "${OS_PRETTY}" ]]; then
-  echo "Detected OS: ${OS_PRETTY}"
+  if [[ -n "${OS_VERSION_ID}" ]]; then
+    echo "Detected OS: ${OS_PRETTY} (${OS_VERSION_ID})"
+  else
+    echo "Detected OS: ${OS_PRETTY}"
+  fi
 fi
 echo "Ensure DNS A/AAAA for your domain points to this server before continuing."
 echo ""
@@ -154,9 +159,14 @@ server {
 }
 EOF
   ln -sf "$CONF_PATH" "${NGINX_SITES_ENABLED}/${SITE_NAME}"
-  # Remove default site if it steals this server_name (optional)
+  # Removing the default site can break other vhosts on shared servers. Opt-in only.
   if [[ -e "${NGINX_SITES_ENABLED}/default" ]]; then
-    rm -f "${NGINX_SITES_ENABLED}/default"
+    if [[ "${REMOVE_DEFAULT_SITE:-}" == "1" ]]; then
+      echo "REMOVE_DEFAULT_SITE=1: removing ${NGINX_SITES_ENABLED}/default (may affect other sites on this host)."
+      rm -f "${NGINX_SITES_ENABLED}/default"
+    else
+      echo "Note: ${NGINX_SITES_ENABLED}/default exists. If Certbot/nginx mis-picks the server block, remove it manually or re-run with REMOVE_DEFAULT_SITE=1 (see docs)."
+    fi
   fi
 else
   # RHEL/Fedora: conf.d

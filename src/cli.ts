@@ -48,9 +48,26 @@ function runSetupHttpsCliCommand(): void {
   process.exitCode = ok ? 0 : 1;
 }
 
+/** True when running in a typical CI/automation environment (suppress interactive prompts). */
+function isLikelyCiEnvironment(): boolean {
+  if (Object.hasOwn(process.env, "CI")) {
+    const raw = process.env.CI;
+    const v = (raw ?? "").trim().toLowerCase();
+    // Explicit opt-out for odd local shells that export CI=false
+    if (v === "false" || v === "0" || v === "no" || v === "off") return false;
+    // Empty CI, CI=1, CI=true, CI=yes, or any other non-opt-out value → treat as CI
+    return true;
+  }
+  const gh = process.env.GITHUB_ACTIONS;
+  if (gh === "true" || gh === "1") return true;
+  const gl = process.env.GITLAB_CI;
+  if (gl === "true" || gl === "1") return true;
+  return false;
+}
+
 function shouldOfferHttpsPrompt(): boolean {
   if (process.env.SHIPHOOK_SKIP_HTTPS_PROMPT === "1") return false;
-  if (process.env.CI === "true") return false;
+  if (isLikelyCiEnvironment()) return false;
   if (process.platform !== "linux") return false;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
   return true;

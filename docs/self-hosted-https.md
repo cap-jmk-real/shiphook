@@ -31,6 +31,8 @@ The setup script will **prompt** for:
 | **Local Shiphook port** | Port Shiphook listens on (default `3141`). |
 | **Webhook path** | URL path nginx proxies (default `/`, same as `SHIPHOOK_PATH` / `shiphook.yaml` `path`). |
 
+**Optional (Debian/Ubuntu only):** if nginx’s default site (`sites-enabled/default`) would interfere with Certbot, you can opt in to removing it by running the setup with `REMOVE_DEFAULT_SITE=1` (e.g. `sudo REMOVE_DEFAULT_SITE=1 bash …/setup-https.sh`). Without that, the script only prints a note and leaves `default` in place so shared servers are not surprised.
+
 The script will:
 
 1. Install **nginx**, **certbot**, and the **certbot nginx** plugin (`apt` or `dnf`/`yum`).
@@ -64,7 +66,7 @@ If you are not on Linux or prefer manual control:
 
 ## Security notes
 
-- Prefer binding Shiphook to **localhost only** if you add that option, or use a firewall so only nginx can reach the Shiphook port.
+- Shiphook’s HTTP server listens on **all interfaces** by default (not localhost-only). Limit who can reach it: run **behind nginx** (as this guide sets up) and/or use a **host firewall** so only `127.0.0.1` or your proxy can reach the Shiphook port from the network.
 - Your webhook **secret** must still be sent as `X-Shiphook-Secret` or `Authorization: Bearer …`; nginx forwards those by default.
 
 ---
