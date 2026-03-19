@@ -39,6 +39,7 @@ describe("createShiphookServer", () => {
       port: 0,
       repoPath: testDir,
       runScript: "node deploy.js",
+        runTimeoutMs: 1000,
       path: "/",
       secret: "test-secret",
     };

@@ -26,11 +26,13 @@ export interface PullAndRunResult {
  *
  * @param repoPath - Working directory for git and the script.
  * @param runScript - Command string (e.g. "npm run deploy" or "pnpm deploy"); parsed into command + args.
+ * @param options - Optional settings (e.g. run timeout).
  * @returns Result with pull/run stdout, stderr, and success flags.
  */
 export async function pullAndRun(
   repoPath: string,
-  runScript: string
+  runScript: string,
+  options?: { timeoutMs?: number }
 ): Promise<PullAndRunResult> {
   const result: PullAndRunResult = {
     success: false,
@@ -59,7 +61,8 @@ export async function pullAndRun(
   }
 
   const [cmd, args] = parseScript(runScript);
-  const runExitCode = await runCommand(cmd, args, repoPath, result);
+  const runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
+  const runExitCode = await runCommand(cmd, args, repoPath, result, runTimeoutMs);
   result.runExitCode = runExitCode;
   result.success = runExitCode === 0;
   return result;
@@ -87,7 +90,7 @@ function runCommand(
   args: string[],
   cwd: string,
   result: PullAndRunResult,
-  timeoutMs: number = 60_000
+  timeoutMs: number = 30 * 60 * 1000 // 30 minutes
 ): Promise<number | null> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {

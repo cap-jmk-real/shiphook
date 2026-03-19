@@ -14,6 +14,7 @@ In your repo (or the directory you run `shiphook` from), add **`shiphook.yaml`**
 port: 3141
 repoPath: .                    # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
+runTimeoutMs: 1800000         # max time for the deploy command (default: 30 minutes)
 path: /
 # secret: your-webhook-secret  # optional; if omitted, CLI auto-generates and persists one
 ```
@@ -33,6 +34,7 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_PORT` | `3141` | TCP port the server listens on. |
 | `SHIPHOOK_REPO_PATH` | (from file or cwd) | Directory where `git pull` and the run script execute. |
 | `SHIPHOOK_RUN_SCRIPT` | (from file or `npm run deploy`) | Command run after `git pull`. |
+| `SHIPHOOK_RUN_TIMEOUT_MS` | `1800000` | Max time (ms) to allow the run script to finish before timing out. |
 | `SHIPHOOK_SECRET` | (auto) | Secret is always required for matching POSTs. If omitted, the CLI auto-generates and persists it to `.shiphook.secret`. |
 | `SHIPHOOK_PATH` | `/` | URL path that accepts the webhook (e.g. `/deploy`). |
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
