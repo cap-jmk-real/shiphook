@@ -16,7 +16,7 @@ export type EnsureSecretResult = {
 };
 
 /**
- * Ensures config.secret is set, generating and persisting it if needed.
+ * Ensures `config.secret` is a non-empty string, generating and persisting it if needed.
  *
  * Persistence location:
  * - `${config.repoPath}/.shiphook.secret`
