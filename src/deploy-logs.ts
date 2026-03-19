@@ -14,6 +14,12 @@ function getLogsDir(repoPath: string) {
   return join(repoPath, ".shiphook", "logs");
 }
 
+/**
+ * Writes structured deploy logs (JSON + human-readable text) into `.shiphook/logs` inside repoPath.
+ *
+ * The JSON file is intended for tools/monitoring; the `.log` file is optimized for humans.
+ * Call this after each deploy to keep a history of pull/run output.
+ */
 export async function writeDeployLogs(args: {
   repoPath: string;
   runScript: string;
