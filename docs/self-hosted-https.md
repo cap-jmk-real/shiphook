@@ -39,12 +39,15 @@ The script will:
 2. Write an nginx site that reverse-proxies your domain + path to `http://127.0.0.1:<port>`.
 3. Run **certbot** with the nginx plugin (`--redirect` to HTTPS).
 4. Enable **Certbot auto-renew** via `certbot.timer` when the package provides it (common on systemd distros).
+5. When the CLI passes bootstrap variables (interactive **`shiphook`** answering **`y`**, or **`shiphook setup-https`**), install **`shiphook.service`** on **systemd** hosts: `WorkingDirectory` is your resolved repo path, `ExecStart` uses the same Node + `dist/cli.js` as this run, `SHIPHOOK_SKIP_HTTPS_PROMPT=1`, and the port/path you entered. Then **`systemctl enable --now shiphook`**.
 
-After setup, use your public URL in the Git host, for example:
+After **`shiphook setup-https`**, or after interactive **`shiphook`** with HTTPS **`y`**, the CLI **prints the webhook secret (TTY)** and **exits** — Shiphook stays up via **`shiphook.service`**, not in the foreground.
+
+Use your public URL in the Git host, for example:
 
 `https://your-domain.example/` or `https://your-domain.example/webhook`
 
-Keep Shiphook running on the same machine (same port), e.g. via systemd or a process manager:
+To run in the foreground only (no systemd), skip HTTPS setup or use **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`**, then:
 
 ```bash
 cd /path/to/your/repo

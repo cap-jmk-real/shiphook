@@ -65,11 +65,15 @@ maybe_open_firewalld() {
 }
 
 have_systemd() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    return 0 # allow systemctl calls to be skipped gracefully later
-  fi
-  # Heuristic: /run/systemd/system exists when systemd is the init system.
-  [[ -d /run/systemd/system ]]
+  command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
+}
+
+# Double-quote a string for use after ExecStart= in a systemd unit (escape \ and ").
+systemd_quote_arg() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '"%s"' "$s"
 }
 
 load_os_release
@@ -254,9 +258,89 @@ else
   echo "Note: certbot.timer not found or systemd not detected. Renewals may use cron; verify with: certbot renew --dry-run"
 fi
 
+install_shiphook_systemd_unit() {
+  local workdir="${SHIPHOOK_SYSTEMD_WORKING_DIRECTORY:-}"
+  local node_bin="${SHIPHOOK_SYSTEMD_NODE_BIN:-}"
+  local cli_js="${SHIPHOOK_SYSTEMD_CLI_JS:-}"
+
+  if [[ -z "$workdir" || -z "$node_bin" || -z "$cli_js" ]]; then
+    echo ""
+    echo "Skipping shiphook.service (set SHIPHOOK_SYSTEMD_* env from the Shiphook CLI for automatic install)."
+    return 0
+  fi
+
+  if ! have_systemd; then
+    echo ""
+    echo "Skipping shiphook.service (systemd not available)."
+    return 0
+  fi
+
+  if [[ ! -d "$workdir" ]]; then
+    echo ""
+    echo "Warning: Working directory does not exist: ${workdir} — shiphook.service not installed."
+    return 0
+  fi
+
+  if [[ "$node_bin" == *'"'* ]] || [[ "$cli_js" == *'"'* ]]; then
+    echo ""
+    echo "Warning: node or CLI path contains a double quote; install shiphook.service manually (see docs/systemd.md)."
+    return 0
+  fi
+
+  local svc_user svc_group
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    svc_user="$SUDO_USER"
+    svc_group=$(id -gn "$SUDO_USER" 2>/dev/null || echo "$svc_user")
+  else
+    svc_user="root"
+    svc_group="root"
+  fi
+
+  local unit_path="/etc/systemd/system/shiphook.service"
+  local exec_line wd_q
+  wd_q=$(systemd_quote_arg "$workdir")
+  exec_line="ExecStart=$(systemd_quote_arg "$node_bin") $(systemd_quote_arg "$cli_js")"
+
+  echo ""
+  echo "Installing Shiphook systemd unit (${unit_path})…"
+  umask 022
+  cat >"$unit_path" <<UNITEOF
+[Unit]
+Description=Shiphook deploy webhook
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${svc_user}
+Group=${svc_group}
+WorkingDirectory=${wd_q}
+${exec_line}
+Restart=on-failure
+RestartSec=5s
+Environment=SHIPHOOK_SKIP_HTTPS_PROMPT=1
+Environment=SHIPHOOK_PORT=${PORT}
+Environment=SHIPHOOK_PATH=${WEBHOOK_PATH}
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+  systemctl daemon-reload
+  systemctl enable shiphook.service
+  if systemctl restart shiphook.service; then
+    echo "shiphook.service enabled and started."
+    echo "  Logs: journalctl -u shiphook.service -f"
+  else
+    echo "Warning: shiphook.service failed to start (is port ${PORT} already in use?). Check: journalctl -u shiphook.service -n 50"
+    return 0
+  fi
+}
+
+install_shiphook_systemd_unit
+
 echo ""
 echo "Done."
 echo "  Public webhook URL: https://${DOMAIN}${WEBHOOK_PATH}"
 echo "  Proxy -> http://127.0.0.1:${PORT}${WEBHOOK_PATH}"
-echo "Run Shiphook on this machine (same port):  shiphook"
 echo "GitHub webhook payload URL must use https:// (and your secret header as configured)."

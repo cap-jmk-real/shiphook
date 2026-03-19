@@ -2,6 +2,8 @@
 
 After HTTPS + nginx are set up, you’ll usually want Shiphook to run **in the background**, survive SSH disconnects, and start on boot. On most modern Linux distros (including AlmaLinux), use **systemd**.
 
+The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) **writes** `/etc/systemd/system/shiphook.service`, reloads systemd, and runs **`systemctl enable --now shiphook.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
+
 ---
 
 ## Example service unit
