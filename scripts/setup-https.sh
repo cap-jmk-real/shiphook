@@ -77,8 +77,10 @@ maybe_selinux_httpd_can_network_connect() {
     echo "Note: SELinux is Enforcing; if nginx returns 502 to upstream, run: sudo setsebool -P httpd_can_network_connect 1"
     return 0
   fi
-  if getsebool httpd_can_network_connect 2>/dev/null | grep -qE '[[:space:]]+on$'; then
-    return 0
+  if command -v getsebool >/dev/null 2>&1; then
+    if getsebool httpd_can_network_connect 2>/dev/null | grep -qE '[[:space:]]+on$'; then
+      return 0
+    fi
   fi
   echo "SELinux (Enforcing): enabling httpd_can_network_connect so nginx can proxy to Shiphook on 127.0.0.1…"
   setsebool -P httpd_can_network_connect 1 ||
