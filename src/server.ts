@@ -5,7 +5,10 @@ import { writeDeployLogs } from "./deploy-logs.js";
 
 /**
  * Creates an HTTP server that accepts POST on config.path, validates webhook secret,
- * and runs git pull + runScript in config.repoPath, returning JSON with pull/run result.
+ * and runs git pull + runScript in config.repoPath.
+ *
+ * By default it streams deploy output as plain text (ending with a `[done] ...` line).
+ * Use `?format=json` to get the old buffered JSON response.
  *
  * @param config - Port, path, secret, repoPath, runScript (see ShiphookConfig).
  * @returns Object with start(), stop(), and listening getter for lifecycle control.
@@ -44,11 +47,64 @@ export function createShiphookServer(config: ShiphookConfig) {
       return;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
+    const requestUrl = new URL(req.url ?? "", "http://localhost");
+    const wantsJson = requestUrl.searchParams.get("format") === "json";
+
+    // Default: stream deploy output as plain text so GitHub Actions can show it live.
+    if (wantsJson) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+    } else {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.write(`[start] shiphook deploy\n`);
+    }
 
     const startedAt = new Date();
+
+    const outputWriter = (() => {
+      // Keep partial lines per (phase, stream) so we can prefix each emitted line.
+      const partialByKey = new Map<string, string>();
+      const prefixForKey = (key: string) => {
+        // key format: `${phase}:${stream}`
+        const [phase, stream] = key.split(":");
+        return `[${phase}] ${stream}: `;
+      };
+
+      const writeChunk = (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
+        const key = `${phase}:${stream}`;
+        const prev = partialByKey.get(key) ?? "";
+        const next = prev + data;
+        const parts = next.split("\n");
+
+        // If chunk ended with newline, last part is "" and should flush.
+        const completeParts = parts.slice(0, -1);
+        const lastPart = parts[parts.length - 1] ?? "";
+
+        for (const line of completeParts) {
+          res.write(`${prefixForKey(key)}${line}\n`);
+        }
+        partialByKey.set(key, lastPart);
+      };
+
+      const flush = () => {
+        for (const [key, partial] of partialByKey.entries()) {
+          if (!partial) continue;
+          res.write(`${prefixForKey(key)}${partial}\n`);
+          partialByKey.set(key, "");
+        }
+      };
+
+      return { writeChunk, flush };
+    })();
+
+    const onOutput = !wantsJson
+      ? (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
+          outputWriter.writeChunk(phase, stream, data);
+        }
+      : undefined;
+
     const result = await pullAndRun(config.repoPath, config.runScript, {
       timeoutMs: config.runTimeoutMs,
+      onOutput,
     });
     const finishedAt = new Date();
 
@@ -82,20 +138,34 @@ export function createShiphookServer(config: ShiphookConfig) {
       const details = err instanceof Error ? err.message : String(err);
       console.error(`shiphook: failed to write deploy logs: ${details}`);
       logInfo = { error: "failed to write deploy logs", details };
+      if (!wantsJson) {
+        res.write(`[log] failed to write deploy logs: ${details}\n`);
+      }
     }
 
-    const body = {
-      ok: result.success,
-      pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
-      run: {
-        stdout: result.runStdout,
-        stderr: result.runStderr,
-        exitCode: result.runExitCode,
-      },
-      error: result.error,
-      log: logInfo,
-    };
-    res.end(JSON.stringify(body));
+    if (wantsJson) {
+      const body = {
+        ok: result.success,
+        pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
+        run: {
+          stdout: result.runStdout,
+          stderr: result.runStderr,
+          exitCode: result.runExitCode,
+        },
+        error: result.error,
+        log: logInfo,
+      };
+      res.end(JSON.stringify(body));
+      return;
+    }
+
+    if (!wantsJson) {
+      outputWriter.flush();
+    }
+
+    const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
+    res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
+    res.end();
   });
 
   return {

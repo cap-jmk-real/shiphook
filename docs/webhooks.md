@@ -23,7 +23,11 @@ For each authorized POST, Shiphook runs the deploy and writes logs into `.shipho
 - `.shiphook/logs/<id>.json`
 - `.shiphook/logs/<id>.log`
 
-The response JSON includes `log: { id, json, log }`.
+By default, Shiphook streams deploy output back to the HTTP client (plain text) and finishes with a final line like:
+
+`[done] ok=true exitCode=0`
+
+If you need the old buffered JSON response, use `?format=json` (the JSON includes `log: { id, json, log }`).
 
 ---
 
@@ -37,6 +41,56 @@ The response JSON includes `log: { id, json, log }`.
 6. Save.
 
 On every push, GitHub sends a POST to that URL. Shiphook runs `git pull` and your run script.
+
+---
+
+## GitHub Actions (live streaming)
+
+When Shiphook receives the webhook, it streams `git pull` + your deploy script output back to the HTTP response.
+
+To see it live in the GitHub Actions step log:
+
+1. Trigger Shiphook with `curl -N` (no curl buffering).
+2. Optionally capture the output and check the final `[done] ...` line so the job fails if deploy fails.
+
+Minimal `shiphook.yaml` (server-side config):
+
+```yaml
+secret: your-secret
+runScript: npm run deploy
+```
+
+Minimal GitHub Actions workflow example (`.github/workflows/deploy.yml`):
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Shiphook webhook (streaming)
+        env:
+          SHIPHOOK_SECRET: ${{ secrets.SHIPHOOK_SECRET }}
+          SHIPHOOK_URL: ${{ secrets.SHIPHOOK_URL }} # optional (defaults to https://shiphook.majico.xyz)
+        run: |
+          BASE="${SHIPHOOK_URL:-https://shiphook.majico.xyz}"
+          BASE="${BASE%/}"
+
+          LOG_FILE="$(mktemp)"
+          curl -N -S -X POST "${BASE}/" \
+            -H "X-Shiphook-Secret: ${SHIPHOOK_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}' 2>&1 | tee "${LOG_FILE}"
+
+          DONE_LINE="$(tail -n 1 "${LOG_FILE}")"
+          echo "Final line: ${DONE_LINE}"
+          echo "${DONE_LINE}" | grep -q '\[done\] ok=true' || exit 1
+```
 
 ---
 
@@ -84,9 +138,14 @@ Shiphook returns:
 - HTTP `200` for **valid authenticated** requests (valid secret)
 - HTTP `401` for **missing/invalid** secrets
 
-In both cases, the response includes a JSON body describing the result.
+For successful requests (HTTP `200`):
 
-**Success (run script exited 0):**
+- Default: streaming plain text output ending with `[done] ok=... exitCode=...`
+- Opt-out JSON: use `?format=json` for the old buffered JSON response
+
+For HTTP `401`, the response is still JSON.
+
+**Success JSON (`?format=json`, run script exited 0):**
 
 ```json
 {
@@ -105,7 +164,7 @@ In both cases, the response includes a JSON body describing the result.
 }
 ```
 
-**Failure (run script exited non-zero):**
+**Failure JSON (`?format=json`, run script exited non-zero):**
 
 ```json
 {
