@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as colors from "kleur/colors";
@@ -17,6 +17,24 @@ function parseCommand(argv: string[]): CliCommand {
   if (cmd === "deploy") return "deploy";
   if (cmd === "setup-https") return "setup-https";
   return "server";
+}
+
+function getShiphookVersion(): string {
+  const fromEnv =
+    (typeof process.env.SHIPHOOK_VERSION === "string" && process.env.SHIPHOOK_VERSION.trim()) ||
+    (typeof process.env.npm_package_version === "string" && process.env.npm_package_version.trim());
+  if (fromEnv) return fromEnv;
+
+  // In published packages, `package.json` is typically present in the package root.
+  try {
+    const distDir = dirname(fileURLToPath(import.meta.url)); // .../dist/
+    const pkgPath = join(distDir, "..", "package.json");
+    if (!existsSync(pkgPath)) return "";
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: string };
+    return typeof pkg.version === "string" ? pkg.version : "";
+  } catch {
+    return "";
+  }
 }
 
 function setupHttpsScriptPath(): string {
@@ -186,10 +204,8 @@ function printShiphookServerSummary(
 ) {
   const { source, secretFilePath } = meta;
   const path = config.path === "/" ? "" : config.path;
-  const versionLabel =
-    typeof process.env.npm_package_version === "string"
-      ? ` v${process.env.npm_package_version}`
-      : "";
+  const v = getShiphookVersion();
+  const versionLabel = v ? ` v${v}` : "";
   const artEnabled = process.env.SHIPHOOK_NO_ART !== "1";
   if (artEnabled) {
     console.log(colors.dim("           |\\"));
@@ -260,6 +276,29 @@ async function main() {
   if (command === "deploy") {
     await runDeploy();
     return;
+  }
+
+  // If systemd already has Shiphook running, `shiphook` should restart it so config changes
+  // are applied. This avoids starting a second listener on the same port.
+  if (process.env.SHIPHOOK_SKIP_SYSTEMD_RESTART !== "1") {
+    // Only attempt if `systemctl` exists.
+    const isActive = spawnSync(
+      "systemctl",
+      ["is-active", "--quiet", "shiphook.service"],
+      { stdio: "ignore" }
+    );
+    if (isActive.status === 0) {
+      console.log("shiphook: shiphook.service is already running; restarting it…");
+      const restartArgs = ["systemctl", "restart", "shiphook.service"];
+      const useSudo = process.getuid?.() !== 0;
+      const r = spawnSync(useSudo ? "sudo" : "systemctl", useSudo ? restartArgs : restartArgs.slice(1), {
+        stdio: "inherit",
+      });
+      if (r.status === 0) process.exit(0);
+      console.warn(
+        "shiphook: systemd restart failed; continuing to start in the foreground."
+      );
+    }
   }
 
   const config = loadConfig();
