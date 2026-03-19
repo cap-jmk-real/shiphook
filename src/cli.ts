@@ -281,55 +281,72 @@ async function main() {
   const config = loadConfig();
   const repoAbs = resolve(config.repoPath);
 
-  const skipSystemdRestart = process.env.SHIPHOOK_SKIP_SYSTEMD_RESTART === "1";
-  const shiphookServiceWasActive =
-    !skipSystemdRestart &&
-    spawnSync("systemctl", ["is-active", "--quiet", "shiphook.service"], {
-      stdio: "ignore",
-    }).status === 0;
+  const offerHttpsPrompt = shouldOfferHttpsPrompt();
+  let exitingAfterHttpsBootstrap = false;
 
-  const restartSystemdAndExit = (exitCode: number) => {
-    console.log("shiphook: shiphook.service is already running; restarting it…");
+  const isInteractiveTerminal = process.stdin.isTTY && process.stdout.isTTY;
+  const shiphookServiceWasActive = spawnSync(
+    "systemctl",
+    ["is-active", "--quiet", "shiphook.service"],
+    { stdio: "ignore" }
+  ).status === 0;
+
+  const runSystemd = (action: "start" | "restart"): boolean => {
     const useSudo = process.getuid?.() !== 0;
     const r = spawnSync(
       useSudo ? "sudo" : "systemctl",
-      useSudo ? ["systemctl", "restart", "shiphook.service"] : ["restart", "shiphook.service"],
+      useSudo
+        ? ["systemctl", action, "shiphook.service"]
+        : [action, "shiphook.service"],
       { stdio: "inherit" }
     );
-    if (r.status === 0) process.exit(exitCode);
-    console.warn("shiphook: systemd restart failed; exiting to avoid port conflicts.");
-    process.exit(1);
+    return r.status === 0;
   };
 
-  const offerHttpsPrompt = shouldOfferHttpsPrompt();
-  let exitingAfterHttpsBootstrap = false;
-  if (shiphookServiceWasActive && !offerHttpsPrompt) {
-    // Non-interactive run: avoid a second foreground listener on the same port.
-    restartSystemdAndExit(0);
-  }
-
-  let wantsHttps = false;
-  if (offerHttpsPrompt) {
-    wantsHttps = await promptOfferHttpsSetup();
-    if (!wantsHttps && shiphookServiceWasActive) {
-      // User declined HTTPS setup but systemd is already running.
-      restartSystemdAndExit(0);
-    }
-
-    if (wantsHttps) {
-      console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
-      const ok = invokeSetupHttpsScript(repoAbs);
-      if (ok) {
-        exitingAfterHttpsBootstrap = true;
-      } else {
-        console.warn(
-          "\nHTTPS setup did not complete successfully. Starting Shiphook on HTTP anyway.\n"
-        );
-        if (shiphookServiceWasActive) {
-          // Avoid port conflict with already-running systemd service.
-          restartSystemdAndExit(0);
+  // Simple behavior for manual `shiphook` runs:
+  // - if shiphook.service is active => restart it and exit
+  // - if not active => start it and exit (create the running systemd process)
+  //
+  // Safety: when systemd launches this CLI (non-TTY), do not restart/start again.
+  if (isInteractiveTerminal) {
+    if (offerHttpsPrompt) {
+      const wantsHttps = await promptOfferHttpsSetup();
+      if (wantsHttps) {
+        console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
+        const ok = invokeSetupHttpsScript(repoAbs);
+        if (ok) {
+          exitingAfterHttpsBootstrap = true;
+        } else {
+          console.warn(
+            "\nHTTPS setup did not complete successfully. Continuing with HTTP server.\n"
+          );
+          // If the service was already running, restart it so we don't bind the port twice.
+          if (shiphookServiceWasActive) {
+            if (!runSystemd("restart")) process.exit(1);
+            return;
+          }
         }
+      } else if (shiphookServiceWasActive) {
+        console.log("shiphook: shiphook.service is already running; restarting it…");
+        if (!runSystemd("restart")) process.exit(1);
+        return;
+      } else {
+        console.log("shiphook: shiphook.service is not running; starting it…");
+        if (runSystemd("start")) return;
+        console.warn(
+          "shiphook: systemd start failed (unit missing or port in use); starting server in foreground instead."
+        );
       }
+    } else if (shiphookServiceWasActive) {
+      console.log("shiphook: shiphook.service is already running; restarting it…");
+      if (!runSystemd("restart")) process.exit(1);
+      return;
+    } else {
+      console.log("shiphook: shiphook.service is not running; starting it…");
+      if (runSystemd("start")) return;
+      console.warn(
+        "shiphook: systemd start failed (unit missing or port in use); starting server in foreground instead."
+      );
     }
   }
 

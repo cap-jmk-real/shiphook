@@ -4,9 +4,9 @@ After HTTPS + nginx are set up, you’ll usually want Shiphook to run **in the b
 
 The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) **writes** `/etc/systemd/system/shiphook.service`, reloads systemd, and runs **`systemctl enable --now shiphook.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
 
-When **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied). To prevent this behavior (start in the foreground instead), set:
+When **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied).
 
-`SHIPHOOK_SKIP_SYSTEMD_RESTART=1`
+When **systemd starts `shiphook.service`**, the CLI won't try to restart it again (avoids restart loops). When you run `shiphook` manually from an interactive terminal, the CLI can restart the unit so the service comes up with updated config.
 
 ---
 
