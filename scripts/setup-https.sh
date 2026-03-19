@@ -64,6 +64,14 @@ maybe_open_firewalld() {
   fi
 }
 
+have_systemd() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0 # allow systemctl calls to be skipped gracefully later
+  fi
+  # Heuristic: /run/systemd/system exists when systemd is the init system.
+  [[ -d /run/systemd/system ]]
+}
+
 load_os_release
 
 echo "Shiphook HTTPS setup (nginx + Certbot)"
@@ -99,6 +107,30 @@ fi
 # Normalize path: must start with /
 if [[ "${WEBHOOK_PATH:0:1}" != "/" ]]; then
   WEBHOOK_PATH="/${WEBHOOK_PATH}"
+fi
+
+# --- Basic input validation to protect nginx config templating ---
+# PORT: digits only, 1–65535
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+  echo "Error: port must be numeric (got: '$PORT')."
+  exit 1
+fi
+if (( PORT < 1 || PORT > 65535 )); then
+  echo "Error: port must be between 1 and 65535 (got: $PORT)."
+  exit 1
+fi
+
+# DOMAIN: letters, digits, dots, hyphens only
+if ! [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
+  echo "Error: domain contains invalid characters (allowed: letters, digits, '.', '-')."
+  exit 1
+fi
+
+# WEBHOOK_PATH: must start with / and only URL-safe path chars (no quotes/semicolons/whitespace)
+if ! [[ "$WEBHOOK_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+  echo "Error: webhook path contains invalid characters."
+  echo "Allowed: '/', letters, digits, '.', '-', '_'. Got: '$WEBHOOK_PATH'"
+  exit 1
 fi
 
 install_packages_debian() {
@@ -191,8 +223,15 @@ EOF
 fi
 
 nginx -t
-systemctl enable nginx
-systemctl restart nginx
+if have_systemd; then
+  systemctl enable nginx
+  systemctl restart nginx
+elif command -v service >/dev/null 2>&1; then
+  echo "systemd not detected; using 'service nginx restart'."
+  service nginx restart || service nginx start || echo "Warning: could not restart nginx via service."
+else
+  echo "Warning: could not detect systemd or 'service'; please ensure nginx is enabled and restarted manually."
+fi
 
 echo ""
 echo "Requesting TLS certificate (Certbot + nginx plugin)..."
@@ -205,14 +244,14 @@ certbot --nginx \
   --redirect
 
 # Auto-renew: systemd timer (Debian/Ubuntu/RHEL certbot packages)
-if systemctl list-unit-files 2>/dev/null | grep -q '^certbot\.timer'; then
+if have_systemd && systemctl list-unit-files 2>/dev/null | grep -q '^certbot\.timer'; then
   systemctl enable certbot.timer
   systemctl start certbot.timer
   echo ""
   echo "Certbot auto-renew enabled (systemd timer). Check: systemctl list-timers | grep -i certbot"
 else
   echo ""
-  echo "Note: certbot.timer not found. Renewals may use cron; verify with: certbot renew --dry-run"
+  echo "Note: certbot.timer not found or systemd not detected. Renewals may use cron; verify with: certbot renew --dry-run"
 fi
 
 echo ""
