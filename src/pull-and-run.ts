@@ -80,8 +80,8 @@ export async function pullAndRun(
     });
   });
 
-  result.pullStdout = pullStdout ?? "";
-  result.pullStderr = pullStderr ?? "";
+  result.pullStdout = pullStdout;
+  result.pullStderr = pullStderr;
   result.pullSuccess = pullExitCode === 0;
   if (!result.pullSuccess && !result.error) {
     result.error = `git pull failed with exit code ${pullExitCode ?? "null"}`;
@@ -171,7 +171,7 @@ function runCommand(
     });
     child.on("error", (err) => {
       const msg = err.message ?? String(err);
-      result.runStderr += msg;
+      stderr += msg;
       result.error = (result.error ?? "") + msg;
       onOutput?.("run", "stderr", msg);
       settle(null);

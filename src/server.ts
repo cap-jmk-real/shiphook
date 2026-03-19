@@ -159,9 +159,7 @@ export function createShiphookServer(config: ShiphookConfig) {
       return;
     }
 
-    if (!wantsJson) {
-      outputWriter.flush();
-    }
+    outputWriter.flush();
 
     const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
     res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
