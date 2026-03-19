@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   # Run version check once on Ubuntu only. If it fails, test matrix is skipped (no Windows/macOS runners).
