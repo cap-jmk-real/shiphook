@@ -58,7 +58,7 @@ GitHub requires an **HTTPS** payload URL. Shiphook listens on HTTP locally; use 
 
 On **Linux** (Debian/Ubuntu or RHEL-family: **AlmaLinux**, Rocky, RHEL, CentOS, Fedora, …), after DNS points your domain at the server:
 
-- The first time you run plain **`shiphook`** in an interactive terminal, it **asks** if you want HTTPS setup; say **`y`** to run it (or run **`shiphook setup-https`** anytime).
+- The first time you run plain **`shiphook`** in an interactive terminal, it **asks** if you want HTTPS setup; say **`y`** to run it (installs nginx/TLS, **`shiphook.service`** on systemd, prints your **webhook secret**, then **exits** — the server keeps running under systemd). Or run **`shiphook setup-https`** anytime.
 - You will be prompted for **domain**, **email** (Let’s Encrypt), **local Shiphook port**, and **webhook path**. The installer configures nginx, obtains a certificate, and enables **Certbot auto-renew** (`certbot.timer` when available).
 
 Non-interactive services: set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`** so the server starts without prompting (HTTPS setup is skipped).

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as colors from "kleur/colors";
-import { loadConfig } from "./config.js";
+import { loadConfig, type ShiphookConfig } from "./config.js";
 import { createShiphookServer } from "./server.js";
 import { pullAndRun } from "./pull-and-run.js";
-import { ensureWebhookSecret } from "./secret.js";
+import { ensureWebhookSecret, type EnsureSecretResult } from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
 type CliCommand = "server" | "deploy" | "setup-https";
@@ -24,14 +24,27 @@ function setupHttpsScriptPath(): string {
   return join(here, "..", "scripts", "setup-https.sh");
 }
 
-/** Runs the root setup script via sudo. Caller must ensure platform is Linux. */
-function invokeSetupHttpsScript(): boolean {
+/** Runs the root setup script via sudo. Pass absolute repo path for systemd WorkingDirectory. */
+function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
   const script = setupHttpsScriptPath();
   if (!existsSync(script)) {
     console.error(`Missing setup script: ${script}`);
     return false;
   }
-  const r = spawnSync("sudo", ["bash", script], { stdio: "inherit" });
+  const cliJs = fileURLToPath(import.meta.url);
+  const nodeBin = process.execPath;
+  const r = spawnSync(
+    "sudo",
+    [
+      "env",
+      `SHIPHOOK_SYSTEMD_WORKING_DIRECTORY=${repoPathAbsolute}`,
+      `SHIPHOOK_SYSTEMD_NODE_BIN=${nodeBin}`,
+      `SHIPHOOK_SYSTEMD_CLI_JS=${cliJs}`,
+      "bash",
+      script,
+    ],
+    { stdio: "inherit" }
+  );
   return r.status === 0;
 }
 
@@ -45,7 +58,9 @@ function runSetupHttpsCliCommand(): void {
     process.exitCode = 1;
     return;
   }
-  const ok = invokeSetupHttpsScript();
+  const config = loadConfig();
+  const repoAbs = resolve(config.repoPath);
+  const ok = invokeSetupHttpsScript(repoAbs);
   process.exitCode = ok ? 0 : 1;
 }
 
@@ -154,42 +169,13 @@ async function runDeploy() {
   process.exitCode = result.success ? 0 : 1;
 }
 
-/**
- * Loads config (env + YAML), ensures auth secret for server mode, starts the webhook server,
- * and logs listen URL and settings.
- */
-async function main() {
-  const command = parseCommand(process.argv);
-  if (command === "setup-https") {
-    runSetupHttpsCliCommand();
-    return;
-  }
-  if (command === "deploy") {
-    await runDeploy();
-    return;
-  }
-
-  if (shouldOfferHttpsPrompt()) {
-    const wantsHttps = await promptOfferHttpsSetup();
-    if (wantsHttps) {
-      console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
-      const ok = invokeSetupHttpsScript();
-      if (ok) {
-        console.log("\nHTTPS setup finished. Starting Shiphook…\n");
-      } else {
-        console.warn(
-          "\nHTTPS setup did not complete successfully. Starting Shiphook on HTTP anyway.\n"
-        );
-      }
-    }
-  }
-
-  const config = loadConfig();
-  const { source, secretFilePath } = await ensureWebhookSecret(config);
-
-  const server = createShiphookServer(config);
-  await server.start();
-
+/** Prints the same Server + Auth summary as after `server.start()` (and surfaces the webhook secret on a TTY). */
+function printShiphookServerSummary(
+  config: ShiphookConfig,
+  meta: EnsureSecretResult,
+  options?: { bootstrapSystemd?: boolean }
+) {
+  const { source, secretFilePath } = meta;
   const path = config.path === "/" ? "" : config.path;
   const versionLabel =
     typeof process.env.npm_package_version === "string"
@@ -209,45 +195,97 @@ async function main() {
   const repoIsDefaultCwd =
     !process.env.SHIPHOOK_REPO_PATH && String(config.repoPath) === process.cwd();
   const repoLabelExtra = repoIsDefaultCwd ? colors.dim(" (default: current working directory)") : "";
+  const listenHint = options?.bootstrapSystemd
+    ? `http://127.0.0.1:${config.port}${path} (behind nginx HTTPS; process: shiphook.service)`
+    : `http://localhost:${config.port}${path}`;
   console.log(
-    `${colors.bold("  URL: ")}  ${colors.white(`http://localhost:${config.port}${path}`)}\n` +
+    `${colors.bold("  URL: ")}  ${colors.white(listenHint)}\n` +
       `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}${repoLabelExtra}\n` +
       `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
   );
   console.log(colors.bold("Auth"));
   console.log(`  Mode:   ${colors.white("required")}`);
-  console.log(`  Source: ${colors.white(String(source ?? ""))}`);
+  console.log(`  Source: ${colors.white(String(source))}`);
   if (source === "generated") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
-    if (process.stdout.isTTY) {
-      console.log("");
-      console.log(
-        colors.bold(
-          colors.green("GitHub webhook “Secret” value (copy this once, keep it safe):")
-        )
-      );
-      console.log(`  ${colors.white(String(config.secret ?? ""))}`);
-      console.log("");
-    } else {
-      console.log(
-        `  Secret: ${colors.white(
-          "hidden (non-interactive output; read from secret file if needed)"
-        )}`
-      );
-    }
+    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
   } else if (source === "file") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
+    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
   } else {
-    // For env/yaml, ensureWebhookSecret() does not write a secret file.
-    console.log(`  Loaded from: ${colors.white(String(source ?? ""))}`);
+    console.log(`  Loaded from: ${colors.white(String(source))}`);
     console.log(
       `  Secret file: ${colors.white(
-        `${String(secretFilePath ?? "")} (not persisted by Shiphook for ${String(
-          source ?? ""
-        )})`
+        `${String(secretFilePath)} (not persisted by Shiphook for ${source})`
       )}`
     );
   }
+
+  const secretTrim = String(config.secret ?? "").trim();
+  if (process.stdout.isTTY && secretTrim.length > 0) {
+    console.log("");
+    console.log(
+      colors.bold(
+        colors.green("GitHub webhook “Secret” value (copy for your repo’s webhook settings):")
+      )
+    );
+    console.log(`  ${colors.white(secretTrim)}`);
+    console.log("");
+  } else if (secretTrim.length > 0) {
+    console.log(
+      `  Secret value: ${colors.dim(
+        "(omitted on non-TTY; read .shiphook.secret, shiphook.yaml, or SHIPHOOK_SECRET)"
+      )}`
+    );
+  }
+}
+
+/**
+ * Loads config (env + YAML), ensures auth secret for server mode, starts the webhook server,
+ * and logs listen URL and settings.
+ */
+async function main() {
+  const command = parseCommand(process.argv);
+  if (command === "setup-https") {
+    runSetupHttpsCliCommand();
+    return;
+  }
+  if (command === "deploy") {
+    await runDeploy();
+    return;
+  }
+
+  const config = loadConfig();
+  const repoAbs = resolve(config.repoPath);
+
+  let exitingAfterHttpsBootstrap = false;
+  if (shouldOfferHttpsPrompt()) {
+    const wantsHttps = await promptOfferHttpsSetup();
+    if (wantsHttps) {
+      console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
+      const ok = invokeSetupHttpsScript(repoAbs);
+      if (ok) {
+        exitingAfterHttpsBootstrap = true;
+      } else {
+        console.warn(
+          "\nHTTPS setup did not complete successfully. Starting Shiphook on HTTP anyway.\n"
+        );
+      }
+    }
+  }
+
+  const secretMeta = await ensureWebhookSecret(config);
+
+  if (exitingAfterHttpsBootstrap) {
+    printShiphookServerSummary(config, secretMeta, { bootstrapSystemd: true });
+    console.log(colors.bold(colors.green("Done. Shiphook is running in the background via systemd.")));
+    console.log("  Check status:  sudo systemctl status shiphook.service");
+    console.log("  Follow logs:   sudo journalctl -u shiphook.service -f");
+    console.log("");
+    process.exit(0);
+  }
+
+  const server = createShiphookServer(config);
+  await server.start();
+  printShiphookServerSummary(config, secretMeta);
 }
 
 main();
