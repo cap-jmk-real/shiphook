@@ -19,7 +19,8 @@
   "files": [
     "dist",
     "README.md",
-    "shiphook.example.yaml"
+    "shiphook.example.yaml",
+    "scripts/setup-https.sh"
   ],
   "scripts": {
     "build": "tsc",

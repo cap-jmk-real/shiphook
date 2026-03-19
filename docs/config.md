@@ -36,6 +36,7 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_SECRET` | (auto) | Secret is always required for matching POSTs. If omitted, the CLI auto-generates and persists it to `.shiphook.secret`. |
 | `SHIPHOOK_PATH` | `/` | URL path that accepts the webhook (e.g. `/deploy`). |
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
+| `SHIPHOOK_SKIP_HTTPS_PROMPT` | (unset) | Set to `1` to skip the interactive “set up HTTPS?” question when starting `shiphook` on Linux (useful for systemd/CI). |
 
 ---
 

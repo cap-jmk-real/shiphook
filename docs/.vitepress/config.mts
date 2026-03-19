@@ -11,6 +11,7 @@ export default defineConfig({
       { text: "Quick start", link: "/quick-start" },
       { text: "Configuration", link: "/config" },
       { text: "Webhooks", link: "/webhooks" },
+      { text: "HTTPS (nginx)", link: "/self-hosted-https" },
       { text: "GitHub", link: "https://github.com/cap-jmk-real/shiphook" },
     ],
     sidebar: [
@@ -18,6 +19,7 @@ export default defineConfig({
       { text: "Quick start", link: "/quick-start" },
       { text: "Configuration", link: "/config" },
       { text: "Webhook setup", link: "/webhooks" },
+      { text: "HTTPS (nginx + Certbot)", link: "/self-hosted-https" },
       { text: "Publishing to npm", link: "/publishing" },
     ],
   },
