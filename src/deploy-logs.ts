@@ -14,6 +14,13 @@ function getLogsDir(repoPath: string) {
   return join(repoPath, ".shiphook", "logs");
 }
 
+function formatTimestampHumanUtc(d: Date): string {
+  // Keep it stable and readable: `YYYY-MM-DD HH:mm:ss UTC`.
+  const iso = d.toISOString(); // ends with `Z`
+  const noMs = iso.replace(/\.\d{3}Z$/, "Z");
+  return noMs.replace("T", " ").replace(/Z$/, " UTC");
+}
+
 /**
  * Writes structured deploy logs (JSON + human-readable text) into `.shiphook/logs` inside repoPath.
  *
@@ -42,6 +49,8 @@ export async function writeDeployLogs(args: {
   const textAbsPath = join(args.repoPath, textPathRelativeToRepo);
 
   const durationMs = Math.max(0, args.finishedAt.getTime() - args.startedAt.getTime());
+  const startedAtHuman = formatTimestampHumanUtc(args.startedAt);
+  const finishedAtHuman = formatTimestampHumanUtc(args.finishedAt);
 
   const payload = {
     id,
@@ -68,8 +77,8 @@ export async function writeDeployLogs(args: {
 
   const text = [
     `shiphook deploy log: ${id}`,
-    `startedAt: ${payload.startedAt}`,
-    `finishedAt: ${payload.finishedAt}`,
+    `startedAt: ${startedAtHuman}`,
+    `finishedAt: ${finishedAtHuman}`,
     `durationMs: ${payload.durationMs}`,
     ``,
     `repoPath: ${payload.repoPath}`,
