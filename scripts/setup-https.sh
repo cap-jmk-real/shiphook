@@ -76,6 +76,36 @@ systemd_quote_arg() {
   printf '"%s"' "$s"
 }
 
+# systemd WorkingDirectory= must be absolute; relative paths are resolved from / and break deploys.
+# Prefer GNU realpath -m (works for missing final components); else readlink -f or cd+pwd for existing dirs.
+absolutize_workdir_for_systemd() {
+  local p=$1 out
+  if command -v realpath >/dev/null 2>&1; then
+    out=$(realpath -m -- "$p" 2>/dev/null) || true
+    if [[ -n "$out" && "${out:0:1}" == "/" ]]; then
+      printf '%s\n' "$out"
+      return 0
+    fi
+  fi
+  if [[ -d "$p" ]]; then
+    if command -v readlink >/dev/null 2>&1; then
+      out=$(readlink -f "$p" 2>/dev/null) || true
+      if [[ -n "$out" && "${out:0:1}" == "/" ]]; then
+        printf '%s\n' "$out"
+        return 0
+      fi
+    fi
+    printf '%s\n' "$(cd "$p" && pwd)"
+    return 0
+  fi
+  if [[ "${p:0:1}" == "/" ]]; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+  printf '%s\n' "$p"
+  return 1
+}
+
 load_os_release
 
 echo "Shiphook HTTPS setup (nginx + Certbot)"
@@ -266,6 +296,15 @@ install_shiphook_systemd_unit() {
   if [[ -z "$workdir" || -z "$node_bin" || -z "$cli_js" ]]; then
     echo ""
     echo "Skipping shiphook.service (set SHIPHOOK_SYSTEMD_* env from the Shiphook CLI for automatic install)."
+    return 0
+  fi
+
+  local resolved
+  resolved=$(absolutize_workdir_for_systemd "$workdir") || true
+  workdir=$resolved
+  if [[ "${workdir:0:1}" != "/" ]]; then
+    echo ""
+    echo "Warning: Working directory must be an absolute path for systemd (could not resolve: ${SHIPHOOK_SYSTEMD_WORKING_DIRECTORY:-?}). shiphook.service not installed — see docs/systemd.md."
     return 0
   fi
 
