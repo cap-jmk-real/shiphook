@@ -18,6 +18,9 @@ docs/.vitepress/cache/
 .env.*
 !.env.example
 
+# Shiphook local HTTPS wizard defaults (domain, email, port, path)
+.shiphook/setup-https.defaults
+
 # Logs and debug
 *.log
 npm-debug.log*

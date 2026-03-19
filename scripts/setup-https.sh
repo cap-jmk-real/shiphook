@@ -127,6 +127,55 @@ absolutize_workdir_for_systemd() {
   return 1
 }
 
+# Optional: SHIPHOOK_HTTPS_DEFAULTS_FILE (set by shiphook CLI) — last domain/email/port/path for this repo.
+load_https_defaults_from_file() {
+  DEFAULT_DOMAIN=""
+  DEFAULT_EMAIL=""
+  DEFAULT_PORT=""
+  DEFAULT_WEBHOOK_PATH=""
+  local f="${SHIPHOOK_HTTPS_DEFAULTS_FILE:-}"
+  [[ -n "$f" && -r "$f" ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+    [[ "$line" != *"="* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="${key%"${key##*[![:space:]]}"}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    case "$key" in
+      DOMAIN) DEFAULT_DOMAIN="$val" ;;
+      EMAIL) DEFAULT_EMAIL="$val" ;;
+      PORT) DEFAULT_PORT="$val" ;;
+      WEBHOOK_PATH) DEFAULT_WEBHOOK_PATH="$val" ;;
+    esac
+  done <"$f"
+}
+
+save_https_defaults_to_file() {
+  local f="${SHIPHOOK_HTTPS_DEFAULTS_FILE:-}"
+  [[ -n "$f" ]] || return 0
+  local d tmp
+  d=$(dirname "$f")
+  mkdir -p "$d"
+  umask 077
+  tmp="${f}.tmp.$$"
+  {
+    echo "# Shiphook HTTPS setup — defaults for the next run in this repo (safe to edit)."
+    echo "DOMAIN=$DOMAIN"
+    echo "EMAIL=$EMAIL"
+    echo "PORT=$PORT"
+    echo "WEBHOOK_PATH=$WEBHOOK_PATH"
+  } >"$tmp" && mv "$tmp" "$f"
+  chmod 600 "$f" 2>/dev/null || true
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    chown "${SUDO_USER}:${SUDO_USER}" "$f" "$d" 2>/dev/null || true
+  fi
+  echo ""
+  echo "Saved HTTPS defaults for next run: ${f}"
+}
+
 load_os_release
 
 echo "Shiphook HTTPS setup (nginx + Certbot)"
@@ -140,12 +189,20 @@ fi
 echo "Ensure DNS A/AAAA for your domain points to this server before continuing."
 echo ""
 
-read -r -p "Domain (e.g. deploy.example.com): " DOMAIN
-read -r -p "Email for Let's Encrypt (required for expiry notices): " EMAIL
-read -r -p "Local Shiphook port [3141]: " PORT
-PORT="${PORT:-3141}"
-read -r -p "Webhook URL path on this host [/]: " WEBHOOK_PATH
-WEBHOOK_PATH="${WEBHOOK_PATH:-/}"
+load_https_defaults_from_file
+if [[ -n "${DEFAULT_DOMAIN:-}${DEFAULT_EMAIL:-}${DEFAULT_PORT:-}${DEFAULT_WEBHOOK_PATH:-}" ]]; then
+  echo "Loaded saved defaults (press Enter to keep [bracketed] values)."
+  echo ""
+fi
+
+read -r -p "Domain (e.g. deploy.example.com) [${DEFAULT_DOMAIN:-}]: " DOMAIN
+DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
+read -r -p "Email for Let's Encrypt [${DEFAULT_EMAIL:-}]: " EMAIL
+EMAIL="${EMAIL:-$DEFAULT_EMAIL}"
+read -r -p "Local Shiphook port [${DEFAULT_PORT:-3141}]: " PORT
+PORT="${PORT:-${DEFAULT_PORT:-3141}}"
+read -r -p "Webhook URL path on this host [${DEFAULT_WEBHOOK_PATH:-/}]: " WEBHOOK_PATH
+WEBHOOK_PATH="${WEBHOOK_PATH:-${DEFAULT_WEBHOOK_PATH:-/}}"
 
 DOMAIN="${DOMAIN//[[:space:]]/}"
 EMAIL="${EMAIL//[[:space:]]/}"
@@ -399,6 +456,8 @@ UNITEOF
 }
 
 install_shiphook_systemd_unit
+
+save_https_defaults_to_file
 
 echo ""
 echo "Done."
