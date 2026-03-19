@@ -303,6 +303,26 @@ async function main() {
     return r.status === 0;
   };
 
+  const ensureShiphookService = (
+    action: "start" | "restart",
+    opts?: { logMessage?: string }
+  ): boolean => {
+    if (opts?.logMessage) console.log(opts.logMessage);
+
+    const ok = runSystemd(action);
+    if (ok) return true;
+
+    if (action === "restart") {
+      process.exit(1);
+    }
+
+    // For start failures, fall back to running the server in the foreground.
+    console.warn(
+      "shiphook: systemd start failed (unit missing or port in use); starting server in foreground instead."
+    );
+    return false;
+  };
+
   // Simple behavior for manual `shiphook` runs:
   // - if shiphook.service is active => restart it and exit
   // - if not active => start it and exit (create the running systemd process)
@@ -322,31 +342,25 @@ async function main() {
           );
           // If the service was already running, restart it so we don't bind the port twice.
           if (shiphookServiceWasActive) {
-            if (!runSystemd("restart")) process.exit(1);
+            ensureShiphookService("restart");
             return;
           }
         }
       } else if (shiphookServiceWasActive) {
-        console.log("shiphook: shiphook.service is already running; restarting it…");
-        if (!runSystemd("restart")) process.exit(1);
+        ensureShiphookService("restart", {
+          logMessage: "shiphook: shiphook.service is already running; restarting it…",
+        });
         return;
       } else {
-        console.log("shiphook: shiphook.service is not running; starting it…");
-        if (runSystemd("start")) return;
-        console.warn(
-          "shiphook: systemd start failed (unit missing or port in use); starting server in foreground instead."
-        );
+        if (ensureShiphookService("start", { logMessage: "shiphook: shiphook.service is not running; starting it…" })) return;
       }
     } else if (shiphookServiceWasActive) {
-      console.log("shiphook: shiphook.service is already running; restarting it…");
-      if (!runSystemd("restart")) process.exit(1);
+      ensureShiphookService("restart", {
+        logMessage: "shiphook: shiphook.service is already running; restarting it…",
+      });
       return;
     } else {
-      console.log("shiphook: shiphook.service is not running; starting it…");
-      if (runSystemd("start")) return;
-      console.warn(
-        "shiphook: systemd start failed (unit missing or port in use); starting server in foreground instead."
-      );
+      if (ensureShiphookService("start", { logMessage: "shiphook: shiphook.service is not running; starting it…" })) return;
     }
   }
 
