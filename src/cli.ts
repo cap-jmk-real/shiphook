@@ -278,35 +278,43 @@ async function main() {
     return;
   }
 
-  // If systemd already has Shiphook running, `shiphook` should restart it so config changes
-  // are applied. This avoids starting a second listener on the same port.
-  if (process.env.SHIPHOOK_SKIP_SYSTEMD_RESTART !== "1") {
-    // Only attempt if `systemctl` exists.
-    const isActive = spawnSync(
-      "systemctl",
-      ["is-active", "--quiet", "shiphook.service"],
-      { stdio: "ignore" }
-    );
-    if (isActive.status === 0) {
-      console.log("shiphook: shiphook.service is already running; restarting it…");
-      const restartArgs = ["systemctl", "restart", "shiphook.service"];
-      const useSudo = process.getuid?.() !== 0;
-      const r = spawnSync(useSudo ? "sudo" : "systemctl", useSudo ? restartArgs : restartArgs.slice(1), {
-        stdio: "inherit",
-      });
-      if (r.status === 0) process.exit(0);
-      console.warn(
-        "shiphook: systemd restart failed; continuing to start in the foreground."
-      );
-    }
-  }
-
   const config = loadConfig();
   const repoAbs = resolve(config.repoPath);
 
+  const skipSystemdRestart = process.env.SHIPHOOK_SKIP_SYSTEMD_RESTART === "1";
+  const shiphookServiceWasActive =
+    !skipSystemdRestart &&
+    spawnSync("systemctl", ["is-active", "--quiet", "shiphook.service"], {
+      stdio: "ignore",
+    }).status === 0;
+
+  const restartSystemdAndExit = (exitCode: number) => {
+    console.log("shiphook: shiphook.service is already running; restarting it…");
+    const useSudo = process.getuid?.() !== 0;
+    const r = spawnSync(
+      useSudo ? "sudo" : "systemctl",
+      useSudo ? ["systemctl", "restart", "shiphook.service"] : ["restart", "shiphook.service"],
+      { stdio: "inherit" }
+    );
+    if (r.status === 0) process.exit(exitCode);
+    console.warn("shiphook: systemd restart failed; continuing.");
+  };
+
+  const offerHttpsPrompt = shouldOfferHttpsPrompt();
   let exitingAfterHttpsBootstrap = false;
-  if (shouldOfferHttpsPrompt()) {
-    const wantsHttps = await promptOfferHttpsSetup();
+  if (shiphookServiceWasActive && !offerHttpsPrompt) {
+    // Non-interactive run: avoid a second foreground listener on the same port.
+    restartSystemdAndExit(0);
+  }
+
+  let wantsHttps = false;
+  if (offerHttpsPrompt) {
+    wantsHttps = await promptOfferHttpsSetup();
+    if (!wantsHttps && shiphookServiceWasActive) {
+      // User declined HTTPS setup but systemd is already running.
+      restartSystemdAndExit(0);
+    }
+
     if (wantsHttps) {
       console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
       const ok = invokeSetupHttpsScript(repoAbs);
@@ -316,6 +324,10 @@ async function main() {
         console.warn(
           "\nHTTPS setup did not complete successfully. Starting Shiphook on HTTP anyway.\n"
         );
+        if (shiphookServiceWasActive) {
+          // Avoid port conflict with already-running systemd service.
+          restartSystemdAndExit(0);
+        }
       }
     }
   }
