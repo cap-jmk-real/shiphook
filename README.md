@@ -52,6 +52,19 @@ For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a lo
 
 The server response includes `log: { id, json, log }` so you can correlate a request to a file.
 
+## Public HTTPS (GitHub webhooks)
+
+GitHub requires an **HTTPS** payload URL. Shiphook listens on HTTP locally; use **nginx + Let’s Encrypt (Certbot)** in front.
+
+On **Linux** (Debian/Ubuntu or RHEL-family: **AlmaLinux**, Rocky, RHEL, CentOS, Fedora, …), after DNS points your domain at the server:
+
+- The first time you run plain **`shiphook`** in an interactive terminal, it **asks** if you want HTTPS setup; say **`y`** to run it (or run **`shiphook setup-https`** anytime).
+- You will be prompted for **domain**, **email** (Let’s Encrypt), **local Shiphook port**, and **webhook path**. The installer configures nginx, obtains a certificate, and enables **Certbot auto-renew** (`certbot.timer` when available).
+
+Non-interactive services: set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`** so the server starts without prompting (HTTPS setup is skipped).
+
+Details: [HTTPS (nginx + Certbot)](https://cap-jmk-real.github.io/shiphook/self-hosted-https.html) (docs).
+
 ## Why Shiphook?
 
 - **No vendor lock-in** — Your server, your script, your Git. No third-party deploy service.
@@ -74,7 +87,7 @@ Add a **`shiphook.yaml`** in your repo (see [shiphook.example.yaml](shiphook.exa
 ## GitHub webhook
 
 1. Repo → **Settings** → **Webhooks** → **Add webhook**.
-2. **Payload URL:** `https://your-server:3141/` (or your path).
+2. **Payload URL:** `https://your-domain.example/` (or your path). Use nginx + Certbot in front of Shiphook (`shiphook setup-https` on Linux); do not use plain `http://` for GitHub.
 3. **Secret:** Same as `SHIPHOOK_SECRET` / `.shiphook.secret`.
 4. **Events:** Push events.
 5. Save. Every push triggers a deploy.
