@@ -12,6 +12,7 @@ export default defineConfig({
       { text: "Configuration", link: "/config" },
       { text: "Webhooks", link: "/webhooks" },
       { text: "HTTPS (nginx)", link: "/self-hosted-https" },
+      { text: "Background service (systemd)", link: "/systemd" },
       { text: "GitHub", link: "https://github.com/cap-jmk-real/shiphook" },
     ],
     sidebar: [
@@ -20,6 +21,7 @@ export default defineConfig({
       { text: "Configuration", link: "/config" },
       { text: "Webhook setup", link: "/webhooks" },
       { text: "HTTPS (nginx + Certbot)", link: "/self-hosted-https" },
+      { text: "Background service (systemd)", link: "/systemd" },
       { text: "Publishing to npm", link: "/publishing" },
     ],
   },

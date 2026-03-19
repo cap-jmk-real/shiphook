@@ -162,6 +162,10 @@ async function main() {
   console.log(`  Auth: required (source: ${source})`);
   if (source === "generated") {
     console.log(`  Webhook secret: generated and saved at ${secretFilePath}`);
+    console.log("");
+    console.log("GitHub webhook “Secret” value (copy this once, keep it safe):");
+    console.log(`  ${config.secret}`);
+    console.log("");
   } else if (source === "file") {
     console.log(`  Webhook secret: loaded from ${secretFilePath}`);
   } else {
