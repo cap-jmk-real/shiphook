@@ -8,7 +8,7 @@ After HTTPS + nginx are set up, you’ll usually want Shiphook to run **in the b
 
 Assuming:
 
-- Your repo lives at `/opt/majico`
+- Your repo lives at `/srv/my-app` (replace with **your** repo path)
 - You want the default Shiphook port (`3141`) and path (`/`)
 
 Create `/etc/systemd/system/shiphook.service` as root:
@@ -20,7 +20,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/majico
+WorkingDirectory=/srv/my-app
 ExecStart=/usr/bin/env shiphook
 Restart=on-failure
 RestartSec=5s
@@ -52,7 +52,14 @@ Shiphook now:
 
 ## Notes
 
-- Keep the **WorkingDirectory** pointed at the repo where Shiphook should run (and where `shiphook.yaml` lives).
+- Set **WorkingDirectory** to the repo where Shiphook should run (and where `shiphook.yaml` lives). This is usually the same directory you `cd` into before running `shiphook` manually.
+- Create a non-privileged user for the service (for example, `shiphook`) and ensure that repo directory is owned/readable by that user:
+
+  ```bash
+  sudo useradd --system --shell /usr/sbin/nologin --home /nonexistent shiphook
+  sudo chown -R shiphook:shiphook /srv/my-app
+  ```
+
 - Use `journalctl -u shiphook.service` to inspect logs (including deploys and secrets setup).
 - You can still run `shiphook deploy` manually to trigger one-off deploys; it doesn’t interfere with the service.
 

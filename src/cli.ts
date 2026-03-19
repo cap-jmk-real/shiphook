@@ -115,6 +115,15 @@ async function runDeploy() {
     // Ignore logging failures for manual deploy.
   }
 
+  const artEnabled = process.env.SHIPHOOK_NO_ART !== "1";
+  if (artEnabled) {
+    console.log(colors.dim("           |\\"));
+    console.log(colors.dim("           | \\"));
+    console.log(colors.dim("          /|__\\"));
+    console.log(colors.dim("      ___/____\\___    Shiphook is docking…"));
+    console.log(colors.dim("  ~~~/___________\\~~~~\n"));
+  }
+
   console.log(colors.bold(colors.cyan("Shiphook deploy")));
   console.log(
     `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}\n` +
@@ -133,6 +142,14 @@ async function runDeploy() {
   console.log("");
   console.log(colors.bold("Full result (JSON):"));
   console.log(JSON.stringify({ ...result, log }, null, 2));
+  if (artEnabled) {
+    console.log("");
+    console.log(colors.dim("           |\\"));
+    console.log(colors.dim("           | \\"));
+    console.log(colors.dim("          /|__/"));
+    console.log(colors.dim("      ___/____\\___    Shiphook is sailing off…"));
+    console.log(colors.dim("  ~~~/___________\\~~~~"));
+  }
   // Let stdout flush before exiting.
   process.exitCode = result.success ? 0 : 1;
 }
@@ -178,11 +195,23 @@ async function main() {
     typeof process.env.npm_package_version === "string"
       ? ` v${process.env.npm_package_version}`
       : "";
+  const artEnabled = process.env.SHIPHOOK_NO_ART !== "1";
+  if (artEnabled) {
+    console.log(colors.dim("           |\\"));
+    console.log(colors.dim("           | \\"));
+    console.log(colors.dim("          /|__\\"));
+    console.log(colors.dim("      ___/____\\___    Shiphook is docking…"));
+    console.log(colors.dim("  ~~~/___________\\~~~~\n"));
+  }
+
   console.log(colors.bold(colors.cyan(`Shiphook${versionLabel}`)));
   console.log(colors.bold("Server"));
+  const repoIsDefaultCwd =
+    !process.env.SHIPHOOK_REPO_PATH && String(config.repoPath) === process.cwd();
+  const repoLabelExtra = repoIsDefaultCwd ? colors.dim(" (default: current working directory)") : "";
   console.log(
     `${colors.bold("  URL: ")}  ${colors.white(`http://localhost:${config.port}${path}`)}\n` +
-      `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}\n` +
+      `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}${repoLabelExtra}\n` +
       `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
   );
   console.log(colors.bold("Auth"));
