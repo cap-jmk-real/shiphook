@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as colors from "kleur/colors";
 import { loadConfig } from "./config.js";
 import { createShiphookServer } from "./server.js";
 import { pullAndRun } from "./pull-and-run.js";
@@ -114,6 +115,23 @@ async function runDeploy() {
     // Ignore logging failures for manual deploy.
   }
 
+  console.log(colors.bold(colors.cyan("Shiphook deploy")));
+  console.log(
+    `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}\n` +
+      `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
+  );
+  console.log(
+    `${colors.bold("  OK:  ")}  ${result.success ? colors.green("true") : colors.red("false")}`
+  );
+  console.log(
+    `${colors.bold("  Exit code:")} ${
+      result.runExitCode === 0
+        ? colors.green(String(result.runExitCode))
+        : colors.yellow(String(result.runExitCode ?? "null"))
+    }`
+  );
+  console.log("");
+  console.log(colors.bold("Full result (JSON):"));
   console.log(JSON.stringify({ ...result, log }, null, 2));
   // Let stdout flush before exiting.
   process.exitCode = result.success ? 0 : 1;
@@ -156,22 +174,39 @@ async function main() {
   await server.start();
 
   const path = config.path === "/" ? "" : config.path;
-  console.log(`Shiphook listening on http://localhost:${config.port}${path}`);
-  console.log(`  Repo: ${config.repoPath}`);
-  console.log(`  Run:  ${config.runScript}`);
-  console.log(`  Auth: required (source: ${source})`);
+  const versionLabel =
+    typeof process.env.npm_package_version === "string"
+      ? ` v${process.env.npm_package_version}`
+      : "";
+  console.log(colors.bold(colors.cyan(`Shiphook${versionLabel}`)));
+  console.log(colors.bold("Server"));
+  console.log(
+    `${colors.bold("  URL: ")}  ${colors.white(`http://localhost:${config.port}${path}`)}\n` +
+      `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}\n` +
+      `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
+  );
+  console.log(colors.bold("Auth"));
+  console.log(`  Mode:   ${colors.white("required")}`);
+  console.log(`  Source: ${colors.white(String(source ?? ""))}`);
   if (source === "generated") {
-    console.log(`  Webhook secret: generated and saved at ${secretFilePath}`);
+    console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
     console.log("");
-    console.log("GitHub webhook “Secret” value (copy this once, keep it safe):");
-    console.log(`  ${config.secret}`);
+    console.log(
+      colors.bold(colors.green("GitHub webhook “Secret” value (copy this once, keep it safe):"))
+    );
+    console.log(`  ${colors.white(String(config.secret ?? ""))}`);
     console.log("");
   } else if (source === "file") {
-    console.log(`  Webhook secret: loaded from ${secretFilePath}`);
+    console.log(`  Secret file: ${colors.white(String(secretFilePath ?? ""))}`);
   } else {
     // For env/yaml, ensureWebhookSecret() does not write a secret file.
+    console.log(`  Loaded from: ${colors.white(String(source ?? ""))}`);
     console.log(
-      `  Webhook secret: loaded from ${source}; secret file path: ${secretFilePath} (not persisted by Shiphook for ${source})`
+      `  Secret file: ${colors.white(
+        `${String(secretFilePath ?? "")} (not persisted by Shiphook for ${String(
+          source ?? ""
+        )})`
+      )}`
     );
   }
 }

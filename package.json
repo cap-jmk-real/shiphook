@@ -51,6 +51,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "kleur": "^4.1.5",
     "shell-quote": "^1.8",
     "yaml": "^2.7"
   },
