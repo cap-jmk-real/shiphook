@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig, type ShiphookConfig } from "./config.js";
+import { ensureWebhookSecret } from "./secret.js";
 import { pullAndRun } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
@@ -55,6 +56,14 @@ export function createShiphookServer(
     let pathMatch = initialPathMatch;
     if (reloadConfigEachRequest) {
       try {
+        // When YAML omits `secret`, we still need to load it from `.shiphook.secret`
+        // (or generate + persist it once) so webhook auth keeps working.
+        if (!effectiveConfig.secret.trim()) {
+          // Prefer the already-known startup secret. This avoids relying on YAML to
+          // include `secret` and prevents transient auth failures during reload.
+          effectiveConfig.secret = initialRequiredSecret;
+        }
+        await ensureWebhookSecret(effectiveConfig);
         requiredSecret = validateRequiredSecret(effectiveConfig);
         pathMatch = computePathMatch(effectiveConfig.path);
       } catch (err) {
