@@ -58,7 +58,7 @@ Each deploy writes logs into:
 - `.shiphook/logs/<id>.json` (machine-readable)
 - `.shiphook/logs/<id>.log` (human-readable)
 
-The server response includes `log: { id, json, log }` so you can correlate a request to a file.
+The JSON response (`?format=json`) includes `log: { id, json, log }` so you can correlate a request to a file.
 
 ---
 ## Trigger a deploy
@@ -70,7 +70,7 @@ curl -X POST http://localhost:3141/ \
   -H "X-Shiphook-Secret: <your-secret>"
 ```
 
-The response is JSON: pull stdout/stderr, run script stdout/stderr, and run exit code. If the run script exits 0, `ok` is `true`.
+By default, the response streams `git pull` + your deploy output as plain text and ends with a final line like `[done] ok=true exitCode=0`. If you need the old buffered JSON response, use `?format=json`.
 
 ---
 

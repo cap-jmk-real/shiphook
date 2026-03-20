@@ -33,7 +33,7 @@ By default Shiphook listens on **port 3141**. Send a POST to trigger a deploy:
 curl -X POST http://localhost:3141/
 ```
 
-It runs `git pull` in the repo, then your script (default: `npm run deploy`). Response is JSON with pull and run output.
+It runs `git pull` in the repo, then your script (default: `npm run deploy`). By default Shiphook streams the deploy output back to the HTTP response as plain text and finishes with a final line like `[done] ok=true exitCode=0`. If you need the old buffered JSON response, use `?format=json`.
 
 ## Deploy once (manual)
 
@@ -50,7 +50,7 @@ For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a lo
 - `.shiphook/logs/<id>.json` (machine-readable)
 - `.shiphook/logs/<id>.log` (human-readable)
 
-The server response includes `log: { id, json, log }` so you can correlate a request to a file.
+The JSON response (`?format=json`) includes `log: { id, json, log }` so you can correlate a request to a file.
 
 ## Public HTTPS (GitHub webhooks)
 

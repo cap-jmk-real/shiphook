@@ -285,6 +285,28 @@ NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONF_D="/etc/nginx/conf.d"
 SITE_NAME="shiphook"
 
+# Align nginx upstream timeouts with Shiphook's configured deploy timeout.
+# Shiphook's runTimeoutMs can be set via shiphook.yaml (default: 30 minutes).
+# We add a buffer so streaming responses don't get cut off right at the boundary.
+RUN_TIMEOUT_MS_RAW="${SHIPHOOK_RUN_TIMEOUT_MS:-1800000}"
+PROXY_TIMEOUT_SEC=1800
+if [[ "$RUN_TIMEOUT_MS_RAW" =~ ^[0-9]+$ ]]; then
+  # buffer: +10 minutes
+  PROXY_TIMEOUT_SEC=$((RUN_TIMEOUT_MS_RAW / 1000 + 600))
+  if (( PROXY_TIMEOUT_SEC < 120 )); then
+    PROXY_TIMEOUT_SEC=120
+  fi
+fi
+
+COMMON_PROXY_SETTINGS="$(cat <<EOF
+        proxy_connect_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_send_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_read_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+EOF
+)"
+
 if [[ -d "$NGINX_SITES_AVAILABLE" ]]; then
   CONF_PATH="${NGINX_SITES_AVAILABLE}/${SITE_NAME}"
   mkdir -p "$NGINX_SITES_AVAILABLE" "$NGINX_SITES_ENABLED"
@@ -301,6 +323,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+${COMMON_PROXY_SETTINGS}
     }
 }
 EOF
@@ -331,6 +354,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+${COMMON_PROXY_SETTINGS}
     }
 }
 EOF

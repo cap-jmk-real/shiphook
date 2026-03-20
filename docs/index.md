@@ -11,7 +11,7 @@ Shiphook is a small HTTP server that receives a POST (webhook), runs `git pull` 
 - **Listens** for HTTP POST requests on a port you choose (default: 3141).
 - **Pulls** the latest code with `git pull` in the repo you specify.
 - **Runs** a single command after pull (e.g. `npm run deploy`, `pnpm build`, `./deploy.sh`).
-- **Returns** JSON with pull output, run output, and exit status.
+- **Returns** streaming plain text output by default (ends with a `[done] ...` line). Use `?format=json` to get the old buffered JSON response.
 
 No containers. No third-party deploy service. Configure the deployment in **shiphook.yaml** (or with env vars). One process, one script.
 
