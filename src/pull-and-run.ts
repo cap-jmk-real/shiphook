@@ -137,24 +137,38 @@ function runCommand(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
+    let timeoutMsg = "";
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let killEscalationId: ReturnType<typeof setTimeout> | undefined;
+
     const settle = (code: number | null) => {
       if (settled) return;
       settled = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (killEscalationId !== undefined) clearTimeout(killEscalationId);
       result.runStdout = stdout;
-      result.runStderr = stderr;
-      resolve(code);
+      result.runStderr = stderr + (timedOut && timeoutMsg ? timeoutMsg : "");
+      resolve(timedOut ? null : code);
     };
-    let timeoutId: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-      timeoutId = undefined;
-      if (settled) return;
-      settled = true;
+
+    timeoutId = setTimeout(() => {
+      // Important: do not resolve here. On Windows, the child process may still be alive
+      // for a short time after kill, which can keep temp directories "locked" and make
+      // rmdir() in tests fail with EBUSY.
+      timedOut = true;
+      timeoutMsg = `run script timed out after ${timeoutMs}ms`;
+      onOutput?.("run", "stderr", timeoutMsg);
+      result.error = (result.error ?? "") + timeoutMsg;
+
+      // Best-effort terminate. The Promise will resolve when the child actually closes.
       child.kill("SIGTERM");
-      const msg = `run script timed out after ${timeoutMs}ms`;
-      onOutput?.("run", "stderr", msg);
-      result.runStderr = stderr + msg;
-      result.error = (result.error ?? "") + msg;
-      resolve(null);
+
+      // If SIGTERM doesn't work (common in some Windows environments), escalate.
+      killEscalationId = setTimeout(() => {
+        if (settled) return;
+        child.kill("SIGKILL");
+      }, 5_000);
     }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
       const s = chunk.toString();
