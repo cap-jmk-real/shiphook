@@ -48,7 +48,7 @@ function httpsSetupDefaultsPath(repoPathAbsolute: string): string {
 }
 
 /** Runs the root setup script via sudo. Pass absolute repo path for systemd WorkingDirectory. */
-function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
+function invokeSetupHttpsScript(repoPathAbsolute: string, runTimeoutMs: number): boolean {
   const script = setupHttpsScriptPath();
   if (!existsSync(script)) {
     console.error(`Missing setup script: ${script}`);
@@ -65,6 +65,9 @@ function invokeSetupHttpsScript(repoPathAbsolute: string): boolean {
       `SHIPHOOK_SYSTEMD_NODE_BIN=${nodeBin}`,
       `SHIPHOOK_SYSTEMD_CLI_JS=${cliJs}`,
       `SHIPHOOK_HTTPS_DEFAULTS_FILE=${defaultsFile}`,
+      // Keep nginx upstream timeouts aligned with the configured deploy timeout.
+      // This prevents curl from failing mid-stream on long-running builds.
+      `SHIPHOOK_RUN_TIMEOUT_MS=${runTimeoutMs}`,
       "bash",
       script,
     ],
@@ -85,7 +88,7 @@ function runSetupHttpsCliCommand(): void {
   }
   const config = loadConfig();
   const repoAbs = resolve(config.repoPath);
-  const ok = invokeSetupHttpsScript(repoAbs);
+  const ok = invokeSetupHttpsScript(repoAbs, config.runTimeoutMs);
   process.exitCode = ok ? 0 : 1;
 }
 
@@ -333,7 +336,7 @@ async function main() {
       const wantsHttps = await promptOfferHttpsSetup();
       if (wantsHttps) {
         console.log("Starting HTTPS setup (sudo may ask for your password)…\n");
-        const ok = invokeSetupHttpsScript(repoAbs);
+        const ok = invokeSetupHttpsScript(repoAbs, config.runTimeoutMs);
         if (ok) {
           exitingAfterHttpsBootstrap = true;
         } else {
