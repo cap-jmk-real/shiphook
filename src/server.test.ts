@@ -132,4 +132,76 @@ describe("createShiphookServer", () => {
       await server.stop();
     }
   });
+
+  it("reloads shiphook.yaml on every request when enabled", async () => {
+    const deployOnePath = join(testDir, "deploy-one.js");
+    const deployTwoPath = join(testDir, "deploy-two.js");
+    await writeFile(deployOnePath, "console.log('one');");
+    await writeFile(deployTwoPath, "console.log('two');");
+
+    const writeYaml = async (secret: string, runScript: string) => {
+      const yaml = [
+        `secret: ${secret}`,
+        `runScript: ${runScript}`,
+        `runTimeoutMs: 1000`,
+        `path: /`,
+      ].join("\n");
+      await writeFile(join(testDir, "shiphook.yaml"), yaml);
+    };
+
+    // Prevent env overrides so the test depends only on shiphook.yaml.
+    const envKeys = [
+      "SHIPHOOK_SECRET",
+      "SHIPHOOK_RUN_SCRIPT",
+      "SHIPHOOK_REPO_PATH",
+      "SHIPHOOK_RUN_TIMEOUT_MS",
+      "SHIPHOOK_PATH",
+      "SHIPHOOK_PORT",
+      "SHIPHOOK_CONFIG",
+      "SHIPHOOK_RELOAD_CONFIG_EACH_REQUEST",
+    ] as const;
+    const savedEnv: Record<string, string | undefined> = {};
+    for (const k of envKeys) savedEnv[k] = process.env[k];
+    for (const k of envKeys) delete process.env[k];
+
+    await writeYaml("yaml-secret-1", "node deploy-one.js");
+
+    const server = createShiphookServer(
+      {
+        ...config,
+        port: 3147,
+        repoPath: testDir,
+        runScript: "node deploy-one.js",
+        runTimeoutMs: 1000,
+        path: "/",
+        secret: "yaml-secret-1",
+      },
+      { reloadConfigEachRequest: true, reloadConfigCwd: testDir }
+    );
+
+    await server.start();
+    try {
+      const res1 = await post(3147, "/", "yaml-secret-1", undefined, { asText: true });
+      expect(res1.status).toBe(200);
+      const text1 = res1.body as string;
+      expect(text1).toContain("[run] stdout: one");
+      expect(text1).toMatch(/\[done\]\s+ok=true\s+exitCode=0/);
+
+      // Update the YAML and verify the next request uses the new runScript/secret.
+      await writeYaml("yaml-secret-2", "node deploy-two.js");
+
+      const res2 = await post(3147, "/", "yaml-secret-2", undefined, { asText: true });
+      expect(res2.status).toBe(200);
+      const text2 = res2.body as string;
+      expect(text2).toContain("[run] stdout: two");
+      expect(text2).toMatch(/\[done\]\s+ok=true\s+exitCode=0/);
+    } finally {
+      await server.stop();
+      for (const k of envKeys) {
+        const v = savedEnv[k];
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
 });
