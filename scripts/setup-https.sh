@@ -298,6 +298,15 @@ if [[ "$RUN_TIMEOUT_MS_RAW" =~ ^[0-9]+$ ]]; then
   fi
 fi
 
+COMMON_PROXY_SETTINGS="$(cat <<EOF
+        proxy_connect_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_send_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_read_timeout ${PROXY_TIMEOUT_SEC}s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+EOF
+)"
+
 if [[ -d "$NGINX_SITES_AVAILABLE" ]]; then
   CONF_PATH="${NGINX_SITES_AVAILABLE}/${SITE_NAME}"
   mkdir -p "$NGINX_SITES_AVAILABLE" "$NGINX_SITES_ENABLED"
@@ -314,11 +323,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_connect_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_send_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_read_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_buffering off;
-        proxy_request_buffering off;
+${COMMON_PROXY_SETTINGS}
     }
 }
 EOF
@@ -349,11 +354,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_connect_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_send_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_read_timeout ${PROXY_TIMEOUT_SEC}s;
-        proxy_buffering off;
-        proxy_request_buffering off;
+${COMMON_PROXY_SETTINGS}
     }
 }
 EOF
