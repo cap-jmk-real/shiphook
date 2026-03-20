@@ -23,6 +23,8 @@ You can use **camelCase** (`repoPath`, `runScript`) or **snake_case** (`repo_pat
 
 **Config file lookup:** Shiphook looks in the current working directory for the first file that exists: **shiphook.yaml**, **shiphook.yml**, **.shiphook.yaml**, **.shiphook.yml**. To use a different path, set **`SHIPHOOK_CONFIG`** (e.g. `./custom.yaml`). If no file is found or the file is invalid, only env vars and defaults apply.
 
+By default, Shiphook re-reads `shiphook.yaml` on every webhook POST, so edits to YAML are picked up without restarting `shiphook`.
+
 ---
 
 ## Environment variables (override file)

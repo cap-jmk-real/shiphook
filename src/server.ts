@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import type { ShiphookConfig } from "./config.js";
+import { loadConfig, type ShiphookConfig } from "./config.js";
 import { pullAndRun } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
@@ -11,23 +11,60 @@ import { writeDeployLogs } from "./deploy-logs.js";
  * Use `?format=json` to get the old buffered JSON response.
  *
  * @param config - Port, path, secret, repoPath, runScript (see ShiphookConfig).
+ * @param options - Optional behavior toggles.
  * @returns Object with start(), stop(), and listening getter for lifecycle control.
  */
-export function createShiphookServer(config: ShiphookConfig) {
-  const requiredSecret = config.secret.trim();
-  if (!requiredSecret) {
-    throw new Error(
-      "Shiphook webhook secret is required. Set SHIPHOOK_SECRET or shiphook.yaml:secret (or run the CLI which will generate one)."
-    );
-  }
+export function createShiphookServer(
+  config: ShiphookConfig,
+  options?: { reloadConfigEachRequest?: boolean; reloadConfigCwd?: string }
+) {
+  const reloadConfigEachRequest = options?.reloadConfigEachRequest ?? false;
+  const reloadConfigCwd = options?.reloadConfigCwd ?? process.cwd();
 
-  const pathNorm = config.path.endsWith("/") ? config.path : config.path + "/";
-  const pathMatch = (url: string) => {
-    const u = url.split("?")[0];
-    return u === config.path || u === pathNorm;
+  const validateRequiredSecret = (c: ShiphookConfig): string => {
+    const s = c.secret.trim();
+    if (!s) {
+      throw new Error(
+        "Shiphook webhook secret is required. Set SHIPHOOK_SECRET or shiphook.yaml:secret (or run the CLI which will generate one)."
+      );
+    }
+    return s;
   };
 
+  // Validate once for startup safety (even when reload is enabled, we still need a secret to start).
+  const initialRequiredSecret = validateRequiredSecret(config);
+
+  const computePathMatch = (path: string) => {
+    const pathNorm = path.endsWith("/") ? path : path + "/";
+    return (url: string) => {
+      const u = url.split("?")[0];
+      return u === path || u === pathNorm;
+    };
+  };
+
+  const initialPathMatch = computePathMatch(config.path);
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Optionally reload config for each request so updates in shiphook.yaml apply without restart.
+    // Note: nginx/proxy config (especially the public URL path) may still need a reload if `path:` changes.
+    const effectiveConfig = reloadConfigEachRequest
+      ? loadConfig(process.env, { cwd: reloadConfigCwd })
+      : config;
+
+    let requiredSecret = initialRequiredSecret;
+    let pathMatch = initialPathMatch;
+    if (reloadConfigEachRequest) {
+      try {
+        requiredSecret = validateRequiredSecret(effectiveConfig);
+        pathMatch = computePathMatch(effectiveConfig.path);
+      } catch (err) {
+        const details = err instanceof Error ? err.message : String(err);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid config", details }));
+        return;
+      }
+    }
+
     if (req.method !== "POST" || !pathMatch(req.url ?? "")) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Not found" }));
@@ -102,8 +139,8 @@ export function createShiphookServer(config: ShiphookConfig) {
         }
       : undefined;
 
-    const result = await pullAndRun(config.repoPath, config.runScript, {
-      timeoutMs: config.runTimeoutMs,
+    const result = await pullAndRun(effectiveConfig.repoPath, effectiveConfig.runScript, {
+      timeoutMs: effectiveConfig.runTimeoutMs,
       onOutput,
     });
     const finishedAt = new Date();
@@ -121,8 +158,8 @@ export function createShiphookServer(config: ShiphookConfig) {
       | undefined;
     try {
       const files = await writeDeployLogs({
-        repoPath: config.repoPath,
-        runScript: config.runScript,
+        repoPath: effectiveConfig.repoPath,
+        runScript: effectiveConfig.runScript,
         startedAt,
         finishedAt,
         result,

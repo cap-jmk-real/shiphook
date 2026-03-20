@@ -378,7 +378,14 @@ async function main() {
     process.exit(0);
   }
 
-  const server = createShiphookServer(config);
+  const server = createShiphookServer(config, {
+    // Normal behavior: re-read shiphook.yaml on every webhook POST,
+    // so updates in YAML apply without restarting shiphook.
+    reloadConfigEachRequest: true,
+    // Load shiphook.yaml from the current working directory (where loadConfig()
+    // initially searched for it).
+    reloadConfigCwd: process.cwd(),
+  });
   await server.start();
   printShiphookServerSummary(config, secretMeta);
 }
