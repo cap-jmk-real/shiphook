@@ -53,7 +53,7 @@ port: 8080
 runScript: pnpm run build && pm2 restart all
 ```
 
-**Multiline scripts** (YAML `|` / `|+` blocks, or any value that contains a newline) run in the **system shell**, so each line behaves like a normal script (`set -e`, `podman compose …`, etc.). **Shell operators** on one line (`&&`, `||`, `|`, redirects) also use the shell. A single simple command without those operators is spawned directly (no shell), with the same quoting rules as before.
+**Multiline scripts** (YAML `|` / `|+` blocks, or any value that contains a newline) run **one non-empty, non-`#` line at a time** in order; the run stops on the first failing line (exit code ≠ 0). Each line uses the system shell when that line has shell operators (`&&`, `|`, …) or common shell builtins (`set`, `export`, …); otherwise the line is spawned as a normal argv command. **Single-line** scripts follow the same rules without splitting.
 
 Or with env:
 

@@ -24,13 +24,20 @@ export interface PullAndRunResult {
   error?: string;
 }
 
+type RunChildOutcome = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+};
+
 /**
  * Runs `git pull` in repoPath, then executes runScript in the same directory.
  * If pull fails, the script is still run (e.g. when there is no remote).
  *
  * @param repoPath - Working directory for git and the script.
- * @param runScript - Command string (e.g. "npm run deploy"). Multiline scripts and shell operators
- *   (`&&`, `||`, pipes, etc.) run via the system shell; a single simple argv line is spawned without a shell.
+ * @param runScript - Command string (e.g. "npm run deploy"). Multiline scripts run **one line at a time**
+ *   in order (fail-fast). Shell operators (`&&`, `|`, …) or shell builtins (`set`, `export`, …) use the
+ *   system shell for that line; a simple single-line argv command is spawned without a shell.
  * @param options - Optional settings (e.g. run timeout).
  * @returns Result with pull/run stdout, stderr, and success flags.
  */
@@ -91,12 +98,66 @@ export async function pullAndRun(
 
   const trimmed = runScript.trim();
   const runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
-  const runExitCode = shouldRunViaShell(trimmed)
-    ? await runShellScript(trimmed, repoPath, result, runTimeoutMs, options?.onOutput)
-    : await runParsedScript(trimmed, repoPath, result, runTimeoutMs, options?.onOutput);
+  const deadline = Date.now() + runTimeoutMs;
+
+  const lines = splitRunScriptLines(trimmed);
+  let runExitCode: number | null;
+
+  if (lines.length === 0) {
+    const r = await runOneLine("npm run deploy", repoPath, Math.max(0, deadline - Date.now()), result, onOutput);
+    result.runStdout = r.stdout;
+    result.runStderr = r.stderr;
+    runExitCode = r.exitCode;
+  } else if (lines.length === 1) {
+    const r = await runOneLine(lines[0]!, repoPath, Math.max(0, deadline - Date.now()), result, onOutput);
+    result.runStdout = r.stdout;
+    result.runStderr = r.stderr;
+    runExitCode = r.exitCode;
+  } else {
+    let allOut = "";
+    let allErr = "";
+    runExitCode = 0;
+    for (const line of lines) {
+      const remaining = Math.max(0, deadline - Date.now());
+      if (remaining === 0) {
+        const timeoutMsg = `run script timed out after ${runTimeoutMs}ms`;
+        result.error = (result.error ?? "") + timeoutMsg;
+        onOutput?.("run", "stderr", timeoutMsg);
+        allErr += timeoutMsg;
+        result.runStdout = allOut;
+        result.runStderr = allErr;
+        runExitCode = null;
+        break;
+      }
+      const r = await runOneLine(line, repoPath, remaining, result, onOutput);
+      allOut += r.stdout;
+      allErr += r.stderr;
+      if (r.exitCode !== 0 || r.exitCode === null) {
+        result.runStdout = allOut;
+        result.runStderr = allErr;
+        runExitCode = r.exitCode;
+        break;
+      }
+    }
+    if (runExitCode === 0) {
+      result.runStdout = allOut;
+      result.runStderr = allErr;
+    }
+  }
+
   result.runExitCode = runExitCode;
   result.success = runExitCode === 0;
   return result;
+}
+
+/**
+ * Non-empty, non-comment lines in order (YAML `|` blocks, etc.).
+ */
+function splitRunScriptLines(trimmed: string): string[] {
+  return trimmed
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
 }
 
 /**
@@ -104,49 +165,59 @@ export async function pullAndRun(
  * into [command, args]. Empty string yields ["npm", ["run", "deploy"]].
  */
 function parseScript(script: string): [string, string[]] {
-  const trimmed = script.trim();
-  if (!trimmed) return ["npm", ["run", "deploy"]];
-  const parts = shellParse(trimmed).filter((p): p is string => typeof p === "string");
+  const t = script.trim();
+  if (!t) return ["npm", ["run", "deploy"]];
+  const parts = shellParse(t).filter((p): p is string => typeof p === "string");
   if (parts.length === 0) return ["npm", ["run", "deploy"]];
   return [parts[0], parts.slice(1)];
 }
 
-/** True when the script must run in a shell (multiline YAML blocks, `&&`, pipes, redirects, etc.). */
-function shouldRunViaShell(trimmed: string): boolean {
-  if (!trimmed) return false;
-  if (trimmed.includes("\n")) return true;
-  return shellParse(trimmed).some((p) => typeof p !== "string");
+/** True when the line must run in a shell (operators, pipes, or common shell builtins). */
+function lineNeedsShell(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (shellParse(t).some((p) => typeof p !== "string")) return true;
+  const first = t.split(/\s+/)[0] ?? "";
+  if (/^(set|export|unset|alias|cd)$/.test(first)) return true;
+  return false;
 }
 
-async function runParsedScript(
-  trimmed: string,
+async function runOneLine(
+  line: string,
   cwd: string,
-  result: PullAndRunResult,
   timeoutMs: number,
+  result: PullAndRunResult,
   onOutput?: DeployOutputCallback
-): Promise<number | null> {
-  const [cmd, args] = parseScript(trimmed);
+): Promise<RunChildOutcome> {
+  const t = line.trim();
+  if (!t) {
+    return { stdout: "", stderr: "", exitCode: 0 };
+  }
+  if (lineNeedsShell(t)) {
+    return runShellScriptLine(t, cwd, timeoutMs, result, onOutput);
+  }
+  const [cmd, args] = parseScript(t);
   const child = spawn(cmd, args, {
     cwd,
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  return runChildProcess(child, result, timeoutMs, onOutput);
+  return runChildProcess(child, timeoutMs, result, onOutput);
 }
 
-async function runShellScript(
+async function runShellScriptLine(
   script: string,
   cwd: string,
-  result: PullAndRunResult,
   timeoutMs: number,
+  result: PullAndRunResult,
   onOutput?: DeployOutputCallback
-): Promise<number | null> {
+): Promise<RunChildOutcome> {
   const child = spawn(script, {
     cwd,
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  return runChildProcess(child, result, timeoutMs, onOutput);
+  return runChildProcess(child, timeoutMs, result, onOutput);
 }
 
 /**
@@ -154,10 +225,10 @@ async function runShellScript(
  */
 function runChildProcess(
   child: ChildProcess,
-  result: PullAndRunResult,
   timeoutMs: number,
+  result: PullAndRunResult,
   onOutput?: DeployOutputCallback
-): Promise<number | null> {
+): Promise<RunChildOutcome> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -172,9 +243,8 @@ function runChildProcess(
       settled = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       if (killEscalationId !== undefined) clearTimeout(killEscalationId);
-      result.runStdout = stdout;
-      result.runStderr = stderr + (timedOut && timeoutMsg ? timeoutMsg : "");
-      resolve(timedOut ? null : code);
+      const stderrOut = stderr + (timedOut && timeoutMsg ? timeoutMsg : "");
+      resolve({ stdout, stderr: stderrOut, exitCode: timedOut ? null : code });
     };
 
     timeoutId = setTimeout(() => {
