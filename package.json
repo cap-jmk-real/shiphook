@@ -1,7 +1,7 @@
 {
   "name": "shiphook",
-  "version": "0.9.8",
-  "description": "Ship on hook. Webhook-triggered deploy runner: POST → git pull → run your script. Configure via shiphook.yaml or env. Self-hosted for indie devs and micro-SaaS. No vendor lock-in.",
+  "version": "0.9.9",
+  "description": "Self-hosted webhook deploys: one POST runs git pull and your command—no deploy SaaS. Configure with shiphook.yaml or env; optional nginx/Certbot helper for HTTPS. Node 22+.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cap-jmk-real/shiphook.git"

@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
 export interface ShiphookConfig {
@@ -75,6 +75,35 @@ function findConfigFile(cwd: string, configPath?: string): string | null {
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+/**
+ * True when `resolvedFile` is the same path as, or contained under, `repoRoot` (both resolved).
+ * Used so post-`git pull` reload only applies to repo-local YAML, not e.g. `SHIPHOOK_CONFIG=/etc/shiphook.yaml`.
+ */
+function isResolvedPathUnderRepoRoot(repoRoot: string, resolvedFile: string): boolean {
+  const root = resolve(repoRoot);
+  const file = resolve(resolvedFile);
+  if (root === file) return true;
+  const rel = relative(root, file);
+  if (rel === "") return true;
+  return !rel.startsWith("..");
+}
+
+/**
+ * True when a deploy can reload YAML from the repo tree after `git pull`.
+ * Auto-detected filenames under `cwd` always qualify. If `SHIPHOOK_CONFIG` points outside `cwd`
+ * (e.g. absolute path on another part of the filesystem), returns false so `pull-and-run` keeps
+ * the pre-pull run script instead of re-reading that external file (which `git pull` never updates).
+ */
+export function hasShiphookConfigFile(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const configPath = env.SHIPHOOK_CONFIG;
+  const filePath = findConfigFile(cwd, configPath);
+  if (!filePath) return false;
+  if (!configPath) {
+    return true;
+  }
+  return isResolvedPathUnderRepoRoot(cwd, filePath);
 }
 
 /**

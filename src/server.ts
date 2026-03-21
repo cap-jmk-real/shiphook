@@ -168,7 +168,7 @@ export function createShiphookServer(
     try {
       const files = await writeDeployLogs({
         repoPath: effectiveConfig.repoPath,
-        runScript: effectiveConfig.runScript,
+        runScript: result.runScriptApplied ?? effectiveConfig.runScript,
         startedAt,
         finishedAt,
         result,
