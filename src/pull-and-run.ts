@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { parse as shellParse } from "shell-quote";
 
 export type DeployOutputPhase = "pull" | "run";
@@ -29,7 +29,8 @@ export interface PullAndRunResult {
  * If pull fails, the script is still run (e.g. when there is no remote).
  *
  * @param repoPath - Working directory for git and the script.
- * @param runScript - Command string (e.g. "npm run deploy" or "pnpm deploy"); parsed into command + args.
+ * @param runScript - Command string (e.g. "npm run deploy"). Multiline scripts and shell operators
+ *   (`&&`, `||`, pipes, etc.) run via the system shell; a single simple argv line is spawned without a shell.
  * @param options - Optional settings (e.g. run timeout).
  * @returns Result with pull/run stdout, stderr, and success flags.
  */
@@ -88,16 +89,11 @@ export async function pullAndRun(
   }
   // Still run the script so deploy can proceed (e.g. no remote configured)
 
-  const [cmd, args] = parseScript(runScript);
+  const trimmed = runScript.trim();
   const runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
-  const runExitCode = await runCommand(
-    cmd,
-    args,
-    repoPath,
-    result,
-    runTimeoutMs,
-    options?.onOutput
-  );
+  const runExitCode = shouldRunViaShell(trimmed)
+    ? await runShellScript(trimmed, repoPath, result, runTimeoutMs, options?.onOutput)
+    : await runParsedScript(trimmed, repoPath, result, runTimeoutMs, options?.onOutput);
   result.runExitCode = runExitCode;
   result.success = runExitCode === 0;
   return result;
@@ -115,25 +111,54 @@ function parseScript(script: string): [string, string[]] {
   return [parts[0], parts.slice(1)];
 }
 
-/**
- * Spawns command with args in cwd (shell: false so exit codes propagate and args are not
- * interpreted by a shell), pipes stdout/stderr into result, and resolves with exit code
- * (or null on spawn error or timeout). Optional timeout kills the child and resolves null.
- */
-function runCommand(
-  command: string,
-  args: string[],
+/** True when the script must run in a shell (multiline YAML blocks, `&&`, pipes, redirects, etc.). */
+function shouldRunViaShell(trimmed: string): boolean {
+  if (!trimmed) return false;
+  if (trimmed.includes("\n")) return true;
+  return shellParse(trimmed).some((p) => typeof p !== "string");
+}
+
+async function runParsedScript(
+  trimmed: string,
   cwd: string,
   result: PullAndRunResult,
-  timeoutMs: number = 30 * 60 * 1000, // 30 minutes
+  timeoutMs: number,
+  onOutput?: DeployOutputCallback
+): Promise<number | null> {
+  const [cmd, args] = parseScript(trimmed);
+  const child = spawn(cmd, args, {
+    cwd,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return runChildProcess(child, result, timeoutMs, onOutput);
+}
+
+async function runShellScript(
+  script: string,
+  cwd: string,
+  result: PullAndRunResult,
+  timeoutMs: number,
+  onOutput?: DeployOutputCallback
+): Promise<number | null> {
+  const child = spawn(script, {
+    cwd,
+    shell: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return runChildProcess(child, result, timeoutMs, onOutput);
+}
+
+/**
+ * Wires stdout/stderr, optional timeout, and exit code for a spawned child (with or without shell).
+ */
+function runChildProcess(
+  child: ChildProcess,
+  result: PullAndRunResult,
+  timeoutMs: number,
   onOutput?: DeployOutputCallback
 ): Promise<number | null> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
     let stdout = "";
     let stderr = "";
     let settled = false;

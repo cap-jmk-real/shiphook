@@ -28,6 +28,29 @@ function formatTimestampForFilenameUtc(d: Date): string {
   return noMs.replace(/T/g, "_").replace(/:/g, "-");
 }
 
+const MAX_DEPLOY_LOG_ID_SUFFIX_LEN = 128;
+
+/**
+ * Sanitizes an optional caller-provided id for use in log filenames (basename only).
+ * Allows alphanumerics, hyphen, underscore, dot; strips path separators, `..`, and control chars.
+ * Returns empty if nothing safe remains (caller should fall back to randomUUID()).
+ */
+export function sanitizeDeployLogIdSuffix(raw: string): string {
+  if (typeof raw !== "string") return "";
+  let s = raw.replace(/[\x00-\x1f\x7f\\/]/g, "");
+  while (s.includes("..")) {
+    s = s.replace(/\.\./g, "");
+  }
+  s = s.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  s = s.replace(/^_+|_+$/g, "");
+  if (s.length > MAX_DEPLOY_LOG_ID_SUFFIX_LEN) {
+    s = s.slice(0, MAX_DEPLOY_LOG_ID_SUFFIX_LEN);
+  }
+  s = s.replace(/\.+$/g, "");
+  if (s === "" || s === "." || s === "..") return "";
+  return s;
+}
+
 /**
  * Writes structured deploy logs (JSON + human-readable text) into `.shiphook/logs` inside repoPath.
  *
@@ -44,7 +67,8 @@ export async function writeDeployLogs(args: {
   /** Optional suffix (e.g. fixed UUID) for deterministic filenames in tests. */
   id?: string;
 }): Promise<DeployLogFiles> {
-  const unique = args.id ?? randomUUID();
+  const sanitized = args.id !== undefined ? sanitizeDeployLogIdSuffix(args.id) : "";
+  const unique = sanitized || randomUUID();
   const id = `${formatTimestampForFilenameUtc(args.startedAt)}_${unique}`;
   const logsDir = getLogsDir(args.repoPath);
 

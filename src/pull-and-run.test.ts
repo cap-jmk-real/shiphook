@@ -57,6 +57,38 @@ describe("pullAndRun", () => {
     }
   });
 
+  it("runs multiline runScript via shell (YAML | blocks)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    try {
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      const script = ["echo one", "echo two"].join("\n");
+      const result = await pullAndRun(dir, script);
+      expect(result.runStdout).toContain("one");
+      expect(result.runStdout).toContain("two");
+      expect(result.runExitCode).toBe(0);
+      expect(result.success).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs single-line shell operators (e.g. &&) via shell", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    try {
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      const result = await pullAndRun(dir, "echo a && echo b");
+      expect(result.runStdout).toContain("a");
+      expect(result.runStdout).toContain("b");
+      expect(result.runExitCode).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("times out the run script when it exceeds the configured timeout", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
     try {
