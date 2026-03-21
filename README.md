@@ -47,8 +47,8 @@ shiphook deploy
 
 For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a log file into:
 
-- `.shiphook/logs/<id>.json` (machine-readable)
-- `.shiphook/logs/<id>.log` (human-readable)
+- `.shiphook/logs/<UTC-date>_<id>.json` (machine-readable; filename starts with deploy start time in UTC)
+- `.shiphook/logs/<UTC-date>_<id>.log` (human-readable body; same stem as the JSON file)
 
 The JSON response (`?format=json`) includes `log: { id, json, log }` so you can correlate a request to a file.
 

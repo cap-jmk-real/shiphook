@@ -21,10 +21,18 @@ function formatTimestampHumanUtc(d: Date): string {
   return noMs.replace("T", " ").replace(/Z$/, " UTC");
 }
 
+/** UTC timestamp safe for filenames and directory sorting (no `:`). Example: `2025-03-21_14-30-45Z`. */
+function formatTimestampForFilenameUtc(d: Date): string {
+  const iso = d.toISOString();
+  const noMs = iso.replace(/\.\d{3}Z$/, "Z");
+  return noMs.replace(/T/g, "_").replace(/:/g, "-");
+}
+
 /**
  * Writes structured deploy logs (JSON + human-readable text) into `.shiphook/logs` inside repoPath.
  *
  * The JSON file is intended for tools/monitoring; the `.log` file is optimized for humans.
+ * Filenames are `<UTC-date>_<id>.json` / `.log` so directory listings show when each deploy ran.
  * Call this after each deploy to keep a history of pull/run output.
  */
 export async function writeDeployLogs(args: {
@@ -33,10 +41,11 @@ export async function writeDeployLogs(args: {
   startedAt: Date;
   finishedAt: Date;
   result: PullAndRunResult;
-  // Optional override for deterministic IDs in tests.
+  /** Optional suffix (e.g. fixed UUID) for deterministic filenames in tests. */
   id?: string;
 }): Promise<DeployLogFiles> {
-  const id = args.id ?? randomUUID();
+  const unique = args.id ?? randomUUID();
+  const id = `${formatTimestampForFilenameUtc(args.startedAt)}_${unique}`;
   const logsDir = getLogsDir(args.repoPath);
 
   await mkdir(logsDir, { recursive: true });

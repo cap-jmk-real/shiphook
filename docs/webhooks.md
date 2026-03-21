@@ -20,8 +20,10 @@ Shiphook does not validate payload content (e.g. GitHub payload). It runs `git p
 
 For each authorized POST, Shiphook runs the deploy and writes logs into `.shiphook/logs/`:
 
-- `.shiphook/logs/<id>.json`
-- `.shiphook/logs/<id>.log`
+- `.shiphook/logs/<UTC-date>_<id>.json`
+- `.shiphook/logs/<UTC-date>_<id>.log`
+
+The filename stem is `YYYY-MM-DD_HH-mm-ssZ` (UTC) plus `_` and a UUID so listings sort by time and stay unique.
 
 By default, Shiphook streams deploy output back to the HTTP client (plain text) and finishes with a final line like:
 

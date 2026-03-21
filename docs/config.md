@@ -127,7 +127,7 @@ The server object has `start()`, `stop()`, and a `listening` getter. Config shap
 
 For every deploy (webhook POST or `shiphook deploy`), Shiphook writes:
 
-- `.shiphook/logs/<id>.json` (machine-readable)
-- `.shiphook/logs/<id>.log` (human-readable)
+- `.shiphook/logs/<UTC-date>_<id>.json` (machine-readable; stem begins with deploy start time, UTC)
+- `.shiphook/logs/<UTC-date>_<id>.log` (human-readable)
 
 When using the old buffered JSON response (`?format=json`), the server response includes `log: { id, json, log }` so you can correlate a request to a file.
