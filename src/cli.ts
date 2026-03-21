@@ -10,12 +10,13 @@ import { pullAndRun } from "./pull-and-run.js";
 import { ensureWebhookSecret, type EnsureSecretResult } from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
-type CliCommand = "server" | "deploy" | "setup-https";
+type CliCommand = "server" | "deploy" | "setup-https" | "version";
 
 function parseCommand(argv: string[]): CliCommand {
   const cmd = argv[2];
   if (cmd === "deploy") return "deploy";
   if (cmd === "setup-https") return "setup-https";
+  if (cmd === "version" || cmd === "-v" || cmd === "--version") return "version";
   return "server";
 }
 
@@ -74,6 +75,17 @@ function invokeSetupHttpsScript(repoPathAbsolute: string, runTimeoutMs: number):
     { stdio: "inherit" }
   );
   return r.status === 0;
+}
+
+/** `shiphook version` / `-v` / `--version` — print package version and exit. */
+function runVersionCommand(): void {
+  const v = getShiphookVersion();
+  if (!v) {
+    console.error("shiphook: could not determine version");
+    process.exitCode = 1;
+    return;
+  }
+  console.log(v);
 }
 
 /** `shiphook setup-https` — exit after run. */
@@ -146,7 +158,7 @@ async function runDeploy() {
   try {
     const files = await writeDeployLogs({
       repoPath: config.repoPath,
-      runScript: config.runScript,
+      runScript: result.runScriptApplied ?? config.runScript,
       startedAt,
       finishedAt,
       result,
@@ -170,9 +182,10 @@ async function runDeploy() {
   }
 
   console.log(colors.bold(colors.cyan("Shiphook deploy")));
+  const runShown = result.runScriptApplied ?? config.runScript;
   console.log(
     `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}\n` +
-      `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
+      `${colors.bold("  Run: ")}  ${colors.white(String(runShown))}\n`
   );
   console.log(
     `${colors.bold("  OK:  ")}  ${result.success ? colors.green("true") : colors.red("false")}`
@@ -272,6 +285,10 @@ function printShiphookServerSummary(
  */
 async function main() {
   const command = parseCommand(process.argv);
+  if (command === "version") {
+    runVersionCommand();
+    return;
+  }
   if (command === "setup-https") {
     runSetupHttpsCliCommand();
     return;

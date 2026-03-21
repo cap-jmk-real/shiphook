@@ -77,6 +77,11 @@ function findConfigFile(cwd: string, configPath?: string): string | null {
   return null;
 }
 
+/** True when a Shiphook YAML file exists under `cwd` (respects `SHIPHOOK_CONFIG`). */
+export function hasShiphookConfigFile(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return findConfigFile(cwd, env.SHIPHOOK_CONFIG) !== null;
+}
+
 /**
  * Reads and parses a YAML config file. Validates and sanitizes each field; only valid values
  * are included (e.g. port must be a finite integer in 1–65535, string fields must be non-empty).

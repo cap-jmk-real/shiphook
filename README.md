@@ -43,6 +43,12 @@ From your repo root, run:
 shiphook deploy
 ```
 
+Print the installed version (also `shiphook -v` or `shiphook --version`):
+
+```bash
+shiphook version
+```
+
 ## Logs (deploy history)
 
 For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a log file into:

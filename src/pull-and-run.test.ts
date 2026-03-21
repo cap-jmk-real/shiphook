@@ -57,6 +57,23 @@ describe("pullAndRun", () => {
     }
   });
 
+  it("reloads runScript from shiphook.yaml in repo after git pull when a config file exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    try {
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      await writeFile(join(dir, "deploy.js"), "console.log('from-yaml');");
+      await writeFile(join(dir, "shiphook.yaml"), "runScript: node deploy.js\n");
+      const result = await pullAndRun(dir, "echo SHOULD_NOT_RUN");
+      expect(result.runStdout.trim()).toBe("from-yaml");
+      expect(result.runScriptApplied?.trim()).toBe("node deploy.js");
+      expect(result.success).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs multiline runScript via shell (YAML | blocks)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
     try {

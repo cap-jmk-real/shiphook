@@ -42,6 +42,8 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
 | `SHIPHOOK_SKIP_HTTPS_PROMPT` | (unset) | Set to `1` to skip the interactive “set up HTTPS?” question when starting `shiphook` on Linux (useful for systemd/CI). |
 
+After **`git pull`** on a webhook (or `shiphook deploy`), Shiphook reloads **`shiphook.yaml` from the repo directory** when that file exists (honoring `SHIPHOOK_CONFIG`), then runs **`runScript`** / **`runTimeoutMs`** from that merged view (env vars above still override). The same push can therefore change the deploy command for that run. If there is no config file under the repo path, the run keeps using the script/timeout from the server’s request-time or startup config.
+
 ---
 
 ## Port and run script

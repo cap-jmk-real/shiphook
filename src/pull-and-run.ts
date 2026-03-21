@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { resolve } from "node:path";
 import { parse as shellParse } from "shell-quote";
+import { hasShiphookConfigFile, loadConfig } from "./config.js";
 
 export type DeployOutputPhase = "pull" | "run";
 export type DeployOutputStream = "stdout" | "stderr";
@@ -22,6 +24,9 @@ export interface PullAndRunResult {
   runExitCode: number | null;
   /** Set when pull or run fails (message or stderr). */
   error?: string;
+  /** `runScript` and timeout actually used for the run phase (after `git pull` reload when YAML exists). */
+  runScriptApplied?: string;
+  runTimeoutMsApplied?: number;
 }
 
 type RunChildOutcome = {
@@ -94,10 +99,20 @@ export async function pullAndRun(
   if (!result.pullSuccess && !result.error) {
     result.error = `git pull failed with exit code ${pullExitCode ?? "null"}`;
   }
-  // Still run the script so deploy can proceed (e.g. no remote configured)
+  // Still run the script so deploy can proceed (e.g. when there is no remote configured)
 
-  const trimmed = runScript.trim();
-  const runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
+  const absRepo = resolve(repoPath);
+  // Request-time config is loaded before `git pull`; reload from disk after pull so this run uses
+  // the same shiphook.yaml as the freshly checked-out tree (when a config file lives in the repo).
+  let effectiveRunScript = runScript;
+  let runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
+  if (hasShiphookConfigFile(absRepo)) {
+    const fresh = loadConfig(process.env, { cwd: absRepo });
+    effectiveRunScript = fresh.runScript;
+    runTimeoutMs = fresh.runTimeoutMs;
+  }
+
+  const trimmed = effectiveRunScript.trim();
   const deadline = Date.now() + runTimeoutMs;
 
   const lines = splitRunScriptLines(trimmed);
@@ -147,6 +162,8 @@ export async function pullAndRun(
 
   result.runExitCode = runExitCode;
   result.success = runExitCode === 0;
+  result.runScriptApplied = effectiveRunScript;
+  result.runTimeoutMsApplied = runTimeoutMs;
   return result;
 }
 
