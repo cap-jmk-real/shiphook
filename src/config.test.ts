@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { loadConfig } from "./config.js";
+import { hasShiphookConfigFile, loadConfig } from "./config.js";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { tmpdir } from "node:os";
 
 async function withTempDir(callback: (dir: string) => Promise<void>): Promise<void> {
@@ -152,6 +153,45 @@ describe("loadConfig", () => {
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(5555);
       expect(config.path).toBe("/deploy");
+    });
+  });
+});
+
+describe("hasShiphookConfigFile", () => {
+  const origEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...origEnv };
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+  });
+
+  it("is true for default filenames inside cwd when SHIPHOOK_CONFIG is unset", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(join(dir, "shiphook.yaml"), "runScript: echo\n");
+      delete process.env.SHIPHOOK_CONFIG;
+      expect(hasShiphookConfigFile(dir)).toBe(true);
+    });
+  });
+
+  it("is true when SHIPHOOK_CONFIG points to a file under cwd", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(join(dir, "deploy.yaml"), "runScript: echo\n");
+      process.env.SHIPHOOK_CONFIG = "./deploy.yaml";
+      expect(hasShiphookConfigFile(dir)).toBe(true);
+    });
+  });
+
+  it("is false when SHIPHOOK_CONFIG resolves outside cwd (e.g. absolute external file)", async () => {
+    await withTempDir(async (repo) => {
+      const external = join(tmpdir(), `shiphook-external-${Date.now()}.yaml`);
+      await writeFile(external, "runScript: echo ext\n");
+      await writeFile(join(repo, "shiphook.yaml"), "runScript: echo repo\n");
+      process.env.SHIPHOOK_CONFIG = external;
+      expect(hasShiphookConfigFile(repo)).toBe(false);
+      await rm(external, { force: true });
     });
   });
 });

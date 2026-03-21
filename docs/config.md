@@ -42,7 +42,7 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
 | `SHIPHOOK_SKIP_HTTPS_PROMPT` | (unset) | Set to `1` to skip the interactive “set up HTTPS?” question when starting `shiphook` on Linux (useful for systemd/CI). |
 
-After **`git pull`** on a webhook (or `shiphook deploy`), Shiphook reloads **`shiphook.yaml` from the repo directory** when that file exists (honoring `SHIPHOOK_CONFIG`), then runs **`runScript`** / **`runTimeoutMs`** from that merged view (env vars above still override). The same push can therefore change the deploy command for that run. If there is no config file under the repo path, the run keeps using the script/timeout from the server’s request-time or startup config.
+After **`git pull`** on a webhook (or `shiphook deploy`), Shiphook reloads config **from the repo tree** when a YAML file exists **under** `SHIPHOOK_REPO_PATH` (auto-detected names, or `SHIPHOOK_CONFIG` as a path **inside** that directory). It then runs **`runScript`** / **`runTimeoutMs`** from that merged view (env vars above still override), so the same push can change the deploy command for that run. If `SHIPHOOK_CONFIG` points **outside** the repo (e.g. an absolute file under `/etc`), post-pull reload is skipped for that path—`git pull` does not update those files—so the run uses the script/timeout from the server’s already-loaded config. If there is no repo-local config file, the run also keeps the request-time or startup script/timeout.
 
 ---
 

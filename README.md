@@ -1,8 +1,8 @@
 # Shiphook
 
-**Ship on hook.** One webhook, one command. Receive a POST → `git pull` → run your deploy script. Configure the deployment via **YAML** or env vars. No SaaS, no containers. Just Node and your repo.
+**Self-hosted deploys from Git webhooks** — receive a signed POST, run `git pull`, then run your deploy command. No third-party deploy product: your server, your repo, your script.
 
-Built for **indie devs**, **micro-SaaS**, and **open-source** projects that want simple, self-hosted deploys.
+Shiphook is aimed at **indie projects**, **small SaaS**, and **open source** teams who want something simple they can read and own.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/cap-jmk-real/shiphook/ci.yml?style=flat-square&label=CI)](https://github.com/cap-jmk-real/shiphook/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/shiphook.svg?style=flat-square)](https://www.npmjs.com/package/shiphook)
@@ -14,93 +14,121 @@ Built for **indie devs**, **micro-SaaS**, and **open-source** projects that want
 
 ---
 
+## What it does
+
+1. You run the Shiphook HTTP server in (or next to) your app repo.
+2. Your Git host sends a webhook when you push.
+3. Shiphook verifies a shared secret, runs **`git pull`**, reloads **`shiphook.yaml` from the repo when it lives in that tree**, and runs your **`runScript`** (build, restart containers, etc.).
+4. Output can stream back in the HTTP response (useful for GitHub Actions logs) or as JSON (`?format=json`).
+
+Configuration is **`shiphook.yaml`** in the repo and/or **environment variables** (env wins on conflicts).
+
+---
+
 ## Install
 
 ```bash
 npm install -g shiphook
 ```
 
-## Run
+Requires **Node 22+**.
+
+---
+
+## Run the server
 
 ```bash
 cd /path/to/your/repo
 shiphook
 ```
 
-By default Shiphook listens on **port 3141**. Send a POST to trigger a deploy:
+Default listen port: **3141**. Trigger a deploy:
 
 ```bash
 curl -X POST http://localhost:3141/
 ```
 
-It runs `git pull` in the repo, then your script (default: `npm run deploy`). By default Shiphook streams the deploy output back to the HTTP response as plain text and finishes with a final line like `[done] ok=true exitCode=0`. If you need the old buffered JSON response, use `?format=json`.
+Send the webhook secret as **`X-Shiphook-Secret`** or **`Authorization: Bearer …`** (see [Configuration](#configuration-yaml-or-environment)).
 
-## Deploy once (manual)
+---
 
-From your repo root, run:
+## Manual deploy (no webhook)
 
 ```bash
 shiphook deploy
 ```
 
-Print the installed version (also `shiphook -v` or `shiphook --version`):
+Same flow as a webhook: `git pull`, then your script.
 
-```bash
-shiphook version
-```
+---
 
-## Logs (deploy history)
+## CLI
 
-For every webhook-triggered deploy (and `shiphook deploy`), Shiphook writes a log file into:
+| Command | Purpose |
+|--------|---------|
+| `shiphook` | Start the server (or systemd integration on Linux — see docs). |
+| `shiphook deploy` | Run one deploy in the foreground. |
+| `shiphook version` | Print version (`-v` / `--version` also work). |
+| `shiphook setup-https` | Linux helper for nginx + Let’s Encrypt (GitHub needs HTTPS). |
 
-- `.shiphook/logs/<UTC-date>_<id>.json` (machine-readable; filename starts with deploy start time in UTC)
-- `.shiphook/logs/<UTC-date>_<id>.log` (human-readable body; same stem as the JSON file)
+---
 
-The JSON response (`?format=json`) includes `log: { id, json, log }` so you can correlate a request to a file.
+## Logs
 
-## Public HTTPS (GitHub webhooks)
+Each deploy writes files under **`.shiphook/logs/`**:
 
-GitHub requires an **HTTPS** payload URL. Shiphook listens on HTTP locally; use **nginx + Let’s Encrypt (Certbot)** in front.
+- **`<UTC-date>_<id>.json`** — structured log for tools.
+- **`<UTC-date>_<id>.log`** — human-readable.
 
-On **Linux** (Debian/Ubuntu or RHEL-family: **AlmaLinux**, Rocky, RHEL, CentOS, Fedora, …), after DNS points your domain at the server:
+With **`?format=json`**, the HTTP body includes `log: { id, json, log }` so you can open the matching files.
 
-- The first time you run plain **`shiphook`** in an interactive terminal, it **asks** if you want HTTPS setup; say **`y`** to run it (installs nginx/TLS, **`shiphook.service`** on systemd, prints your **webhook secret**, then **exits** — the server keeps running under systemd). Or run **`shiphook setup-https`** anytime.
-- You will be prompted for **domain**, **email** (Let’s Encrypt), **local Shiphook port**, and **webhook path**. The installer configures nginx, obtains a certificate, and enables **Certbot auto-renew** (`certbot.timer` when available).
+---
 
-Non-interactive services: set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`** so the server starts without prompting (HTTPS setup is skipped).
+## HTTPS (GitHub and most hosts)
 
-Details: [HTTPS (nginx + Certbot)](https://cap-jmk-real.github.io/shiphook/self-hosted-https.html) (docs).
+Hosts expect a **public HTTPS** URL. Shiphook speaks HTTP on localhost; put **nginx** (or similar) and **Let’s Encrypt** in front.
+
+On **Linux**, run **`shiphook setup-https`** or say **`y`** the first time you start `shiphook` in a TTY — the installer can install packages, configure nginx, obtain certs, and install a **systemd** unit. Details: [HTTPS setup](https://cap-jmk-real.github.io/shiphook/self-hosted-https.html).
+
+For servers without a TTY, set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`**.
+
+---
+
+## Configuration (YAML or environment)
+
+Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or use env vars. **Env overrides the file.**
+
+| Option | Default | Notes |
+|--------|---------|--------|
+| `port` / `SHIPHOOK_PORT` | `3141` | Listen port. |
+| `repoPath` / `SHIPHOOK_REPO_PATH` | current directory | Where `git pull` and the script run. |
+| `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command after pull. |
+| `secret` / `SHIPHOOK_SECRET` | (generated) | Required. Omit in YAML and the CLI can create **`.shiphook.secret`**. |
+| `path` / `SHIPHOOK_PATH` | `/` | URL path for the webhook (e.g. `/deploy`). |
+
+After **`git pull`**, Shiphook reloads **repo-local** YAML when the config file lives **inside** the repo. Paths set with **`SHIPHOOK_CONFIG`** to **outside** the repo (e.g. `/etc/...`) are not re-read after pull—use repo-local config if you want each push to pick up YAML changes automatically.
+
+Full reference: **[Documentation](https://cap-jmk-real.github.io/shiphook/)**
+
+---
+
+## GitHub webhook (quick)
+
+1. Repo → **Settings** → **Webhooks** → **Add webhook**.
+2. **Payload URL:** your HTTPS URL (path must match `SHIPHOOK_PATH`).
+3. **Content type:** `application/json`.
+4. **Secret:** same as your Shiphook secret.
+5. **Events:** e.g. **Just the push event**.
+
+---
 
 ## Why Shiphook?
 
-- **No vendor lock-in** — Your server, your script, your Git. No third-party deploy service.
-- **YAML or env** — Put `shiphook.yaml` in your repo (or set env vars). Env overrides file. Run and point your Git webhook at it.
-- **Fits your stack** — Use `npm run deploy`, `pnpm build`, `./deploy.sh`, or anything else.
-- **Secret-based auth (required)** — The server always requires a secret. Set `SHIPHOOK_SECRET` (or `secret:` in `shiphook.yaml`), or omit it and the CLI will auto-generate one and persist it to `.shiphook.secret`. Send it as `X-Shiphook-Secret` or `Authorization: Bearer <secret>`.
+- **No vendor lock-in** — no deploy SaaS account; you control the box and the script.
+- **Small surface** — one Node process, YAML or env, secret-based auth.
+- **Fits real stacks** — `npm run deploy`, Docker, shell, whatever you already use.
 
-## Configuration (YAML or env)
-
-Add a **`shiphook.yaml`** in your repo (see [shiphook.example.yaml](shiphook.example.yaml)) or set env vars. Env overrides the file.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `port` / `SHIPHOOK_PORT` | `3141` | Server port. |
-| `repoPath` / `SHIPHOOK_REPO_PATH` | current dir | Repo path for `git pull` and script. |
-| `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command run after pull. |
-| `secret` / `SHIPHOOK_SECRET` | — | Required for auth. If omitted, the CLI auto-generates and persists one in `.shiphook.secret`. |
-| `path` / `SHIPHOOK_PATH` | `/` | Webhook path (e.g. `/deploy`). |
-
-## GitHub webhook
-
-1. Repo → **Settings** → **Webhooks** → **Add webhook**.
-2. **Payload URL:** `https://your-domain.example/` (or your path). Use nginx + Certbot in front of Shiphook (`shiphook setup-https` on Linux); do not use plain `http://` for GitHub.
-3. **Secret:** Same as `SHIPHOOK_SECRET` / `.shiphook.secret`.
-4. **Events:** Push events.
-5. Save. Every push triggers a deploy.
-
-## Docs
-
-Full docs (install, config, webhooks, programmatic API): **[Documentation](https://cap-jmk-real.github.io/shiphook/)**
+---
 
 ## Programmatic use
 
@@ -112,6 +140,8 @@ await ensureWebhookSecret(config);
 const server = createShiphookServer(config);
 await server.start();
 ```
+
+---
 
 ## License
 
