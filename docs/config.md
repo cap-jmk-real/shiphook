@@ -53,6 +53,8 @@ port: 8080
 runScript: pnpm run build && pm2 restart all
 ```
 
+**Multiline scripts** (YAML `|` / `|+` blocks, or any value that contains a newline) run **one non-empty, non-`#` line at a time** in order; the run stops on the first failing line (exit code ≠ 0). Each line uses the system shell when that line has shell operators (`&&`, `|`, …) or common shell builtins (`set`, `export`, …); otherwise the line is spawned as a normal argv command. **Single-line** scripts follow the same rules without splitting.
+
 Or with env:
 
 ```bash
@@ -127,7 +129,7 @@ The server object has `start()`, `stop()`, and a `listening` getter. Config shap
 
 For every deploy (webhook POST or `shiphook deploy`), Shiphook writes:
 
-- `.shiphook/logs/<id>.json` (machine-readable)
-- `.shiphook/logs/<id>.log` (human-readable)
+- `.shiphook/logs/<UTC-date>_<id>.json` (machine-readable; stem begins with deploy start time, UTC)
+- `.shiphook/logs/<UTC-date>_<id>.log` (human-readable)
 
 When using the old buffered JSON response (`?format=json`), the server response includes `log: { id, json, log }` so you can correlate a request to a file.

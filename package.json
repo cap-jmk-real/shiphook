@@ -1,6 +1,6 @@
 {
   "name": "shiphook",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Ship on hook. Webhook-triggered deploy runner: POST → git pull → run your script. Configure via shiphook.yaml or env. Self-hosted for indie devs and micro-SaaS. No vendor lock-in.",
   "repository": {
     "type": "git",

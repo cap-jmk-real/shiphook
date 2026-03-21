@@ -21,10 +21,41 @@ function formatTimestampHumanUtc(d: Date): string {
   return noMs.replace("T", " ").replace(/Z$/, " UTC");
 }
 
+/** UTC timestamp safe for filenames and directory sorting (no `:`). Example: `2025-03-21_14-30-45Z`. */
+function formatTimestampForFilenameUtc(d: Date): string {
+  const iso = d.toISOString();
+  const noMs = iso.replace(/\.\d{3}Z$/, "Z");
+  return noMs.replace(/T/g, "_").replace(/:/g, "-");
+}
+
+const MAX_DEPLOY_LOG_ID_SUFFIX_LEN = 128;
+
+/**
+ * Sanitizes an optional caller-provided id for use in log filenames (basename only).
+ * Allows alphanumerics, hyphen, underscore, dot; strips path separators, `..`, and control chars.
+ * Returns empty if nothing safe remains (caller should fall back to randomUUID()).
+ */
+export function sanitizeDeployLogIdSuffix(raw: string): string {
+  if (typeof raw !== "string") return "";
+  let s = raw.replace(/[\x00-\x1f\x7f\\/]/g, "");
+  while (s.includes("..")) {
+    s = s.replace(/\.\./g, "");
+  }
+  s = s.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  s = s.replace(/^_+|_+$/g, "");
+  if (s.length > MAX_DEPLOY_LOG_ID_SUFFIX_LEN) {
+    s = s.slice(0, MAX_DEPLOY_LOG_ID_SUFFIX_LEN);
+  }
+  s = s.replace(/\.+$/g, "");
+  if (s === "" || s === "." || s === "..") return "";
+  return s;
+}
+
 /**
  * Writes structured deploy logs (JSON + human-readable text) into `.shiphook/logs` inside repoPath.
  *
  * The JSON file is intended for tools/monitoring; the `.log` file is optimized for humans.
+ * Filenames are `<UTC-date>_<id>.json` / `.log` so directory listings show when each deploy ran.
  * Call this after each deploy to keep a history of pull/run output.
  */
 export async function writeDeployLogs(args: {
@@ -33,10 +64,12 @@ export async function writeDeployLogs(args: {
   startedAt: Date;
   finishedAt: Date;
   result: PullAndRunResult;
-  // Optional override for deterministic IDs in tests.
+  /** Optional suffix (e.g. fixed UUID) for deterministic filenames in tests. */
   id?: string;
 }): Promise<DeployLogFiles> {
-  const id = args.id ?? randomUUID();
+  const sanitized = args.id !== undefined ? sanitizeDeployLogIdSuffix(args.id) : "";
+  const unique = sanitized || randomUUID();
+  const id = `${formatTimestampForFilenameUtc(args.startedAt)}_${unique}`;
   const logsDir = getLogsDir(args.repoPath);
 
   await mkdir(logsDir, { recursive: true });
