@@ -108,8 +108,12 @@ export async function pullAndRun(
   let runTimeoutMs = options?.timeoutMs ?? 30 * 60 * 1000; // default: 30 minutes
   if (hasShiphookConfigFile(absRepo)) {
     const fresh = loadConfig(process.env, { cwd: absRepo });
-    effectiveRunScript = fresh.runScript;
-    runTimeoutMs = fresh.runTimeoutMs;
+    const multiMode = fresh.apps.length > 1 || (fresh.apps.length === 1 && fresh.apps[0]?.host !== "");
+    // In multi-app mode, request routing already chose the app-specific script/timeout.
+    if (!multiMode) {
+      effectiveRunScript = fresh.runScript;
+      runTimeoutMs = fresh.runTimeoutMs;
+    }
   }
 
   const trimmed = effectiveRunScript.trim();
@@ -195,7 +199,7 @@ function lineNeedsShell(line: string): boolean {
   if (!t) return false;
   if (shellParse(t).some((p) => typeof p !== "string")) return true;
   const first = t.split(/\s+/)[0] ?? "";
-  if (/^(set|export|unset|alias|cd)$/.test(first)) return true;
+  if (/^(set|export|unset|alias|cd|echo)$/.test(first)) return true;
   return false;
 }
 

@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig, type ShiphookConfig } from "./config.js";
-import { ensureWebhookSecret } from "./secret.js";
+import { resolve as resolvePath } from "node:path";
+import { loadConfig, type ShiphookAppConfig, type ShiphookConfig } from "./config.js";
+import { ensureWebhookSecret, ensureWebhookSecrets } from "./secret.js";
 import { pullAndRun } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
@@ -21,6 +22,7 @@ export function createShiphookServer(
 ) {
   const reloadConfigEachRequest = options?.reloadConfigEachRequest ?? false;
   const reloadConfigCwd = options?.reloadConfigCwd ?? process.cwd();
+  const appTailByRoute = new Map<string, Promise<void>>();
 
   const validateRequiredSecret = (c: ShiphookConfig): string => {
     const s = c.secret.trim();
@@ -32,8 +34,25 @@ export function createShiphookServer(
     return s;
   };
 
-  // Validate once for startup safety (even when reload is enabled, we still need a secret to start).
-  const initialRequiredSecret = validateRequiredSecret(config);
+  const getApps = (c: ShiphookConfig): ShiphookAppConfig[] => {
+    if (Array.isArray(c.apps) && c.apps.length > 0) return c.apps;
+    return [
+      {
+        name: "default",
+        host: "",
+        path: c.path,
+        repoPath: c.repoPath,
+        runScript: c.runScript,
+        secret: c.secret,
+        runTimeoutMs: c.runTimeoutMs,
+      },
+    ];
+  };
+
+  const isMultiAppConfig = (c: ShiphookConfig): boolean => {
+    const apps = getApps(c);
+    return apps.length > 1 || (apps.length === 1 && apps[0]?.host.trim() !== "");
+  };
 
   const computePathMatch = (path: string) => {
     const pathNorm = path.endsWith("/") ? path : path + "/";
@@ -43,7 +62,61 @@ export function createShiphookServer(
     };
   };
 
-  const initialPathMatch = computePathMatch(config.path);
+  const normalizeHostForRouting = (hostHeader: string): string => {
+    // Match config.ts normalization (trim, lowercase, strip trailing dot, then remove :port suffix).
+    return hostHeader.trim().toLowerCase().replace(/\.$/, "").replace(/:\d+$/, "");
+  };
+
+  // Serialize per working tree/repo so pull + run never overlap for the same checkout.
+  const deployLockKey = (app: ShiphookAppConfig): string =>
+    `${resolvePath(app.repoPath)}|${app.host}|${app.path}`;
+
+  const resolveAppForRequest = (c: ShiphookConfig, req: IncomingMessage): ShiphookAppConfig | null => {
+    const urlRaw = req.url ?? "";
+    const apps = getApps(c);
+    if (!apps.length) return null;
+
+    if (!isMultiAppConfig(c)) {
+      const app = apps[0]!;
+      return computePathMatch(app.path)(urlRaw) ? app : null;
+    }
+
+    const hostHeader = req.headers.host;
+    const host = typeof hostHeader === "string" ? normalizeHostForRouting(hostHeader) : "";
+    if (!host) return null;
+
+    for (const app of apps) {
+      if (app.host !== host) continue;
+      if (computePathMatch(app.path)(urlRaw)) return app;
+    }
+    return null;
+  };
+
+  const enqueueAppDeploy = async <T>(app: ShiphookAppConfig, task: () => Promise<T>): Promise<T> => {
+    const key = deployLockKey(app);
+    const prev = appTailByRoute.get(key) ?? Promise.resolve();
+    const run = prev.then(task, task);
+    const tail = run.then(() => undefined, () => undefined);
+    appTailByRoute.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (appTailByRoute.get(key) === tail) appTailByRoute.delete(key);
+    }
+  };
+
+  // Validate once for startup safety.
+  const initialIsMulti = isMultiAppConfig(config);
+  const initialRequiredSecret = initialIsMulti ? "" : validateRequiredSecret(config);
+  if (initialIsMulti) {
+    for (const app of getApps(config)) {
+      if (!app.secret.trim()) {
+        throw new Error(
+          `Invalid multi-app config: app "${app.name}" (${app.host}${app.path}) is missing secret`
+        );
+      }
+    }
+  }
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // Optionally reload config for each request so updates in shiphook.yaml apply without restart.
@@ -52,20 +125,19 @@ export function createShiphookServer(
       ? loadConfig(process.env, { cwd: reloadConfigCwd })
       : config;
 
-    let requiredSecret = initialRequiredSecret;
-    let pathMatch = initialPathMatch;
+    let effectiveRequiredSecret = initialRequiredSecret;
     if (reloadConfigEachRequest) {
       try {
-        // When YAML omits `secret`, we still need to load it from `.shiphook.secret`
-        // (or generate + persist it once) so webhook auth keeps working.
-        if (!effectiveConfig.secret.trim()) {
-          // Prefer the already-known startup secret. This avoids relying on YAML to
-          // include `secret` and prevents transient auth failures during reload.
-          effectiveConfig.secret = initialRequiredSecret;
+        if (!isMultiAppConfig(effectiveConfig)) {
+          // When single-app YAML omits `secret`, still ensure/persist it.
+          if (!effectiveConfig.secret.trim()) {
+            effectiveConfig.secret = initialRequiredSecret;
+          }
+          await ensureWebhookSecret(effectiveConfig);
+          effectiveRequiredSecret = validateRequiredSecret(effectiveConfig);
+        } else {
+          await ensureWebhookSecrets(effectiveConfig);
         }
-        await ensureWebhookSecret(effectiveConfig);
-        requiredSecret = validateRequiredSecret(effectiveConfig);
-        pathMatch = computePathMatch(effectiveConfig.path);
       } catch (err) {
         const details = err instanceof Error ? err.message : String(err);
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -74,7 +146,14 @@ export function createShiphookServer(
       }
     }
 
-    if (req.method !== "POST" || !pathMatch(req.url ?? "")) {
+    if (req.method !== "POST") {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Not found" }));
+      return;
+    }
+
+    const matchedApp = resolveAppForRequest(effectiveConfig, req);
+    if (!matchedApp) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Not found" }));
       return;
@@ -87,129 +166,134 @@ export function createShiphookServer(
       typeof authHeader === "string" && authHeader.startsWith("Bearer ")
         ? authHeader.slice(7)
         : shiphookSecret;
+    const requiredSecret = isMultiAppConfig(effectiveConfig)
+      ? matchedApp.secret
+      : (effectiveRequiredSecret || matchedApp.secret);
     if (token !== requiredSecret) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
       return;
     }
 
-    const requestUrl = new URL(req.url ?? "", "http://localhost");
-    const wantsJson = requestUrl.searchParams.get("format") === "json";
+    await enqueueAppDeploy(matchedApp, async () => {
+      const requestUrl = new URL(req.url ?? "", "http://localhost");
+      const wantsJson = requestUrl.searchParams.get("format") === "json";
 
-    // Default: stream deploy output as plain text so GitHub Actions can show it live.
-    if (wantsJson) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-    } else {
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.write(`[start] shiphook deploy\n`);
-    }
-
-    const startedAt = new Date();
-
-    const outputWriter = (() => {
-      // Keep partial lines per (phase, stream) so we can prefix each emitted line.
-      const partialByKey = new Map<string, string>();
-      const prefixForKey = (key: string) => {
-        // key format: `${phase}:${stream}`
-        const [phase, stream] = key.split(":");
-        return `[${phase}] ${stream}: `;
-      };
-
-      const writeChunk = (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
-        const key = `${phase}:${stream}`;
-        const prev = partialByKey.get(key) ?? "";
-        const next = prev + data;
-        const parts = next.split("\n");
-
-        // If chunk ended with newline, last part is "" and should flush.
-        const completeParts = parts.slice(0, -1);
-        const lastPart = parts[parts.length - 1] ?? "";
-
-        for (const line of completeParts) {
-          res.write(`${prefixForKey(key)}${line}\n`);
-        }
-        partialByKey.set(key, lastPart);
-      };
-
-      const flush = () => {
-        for (const [key, partial] of partialByKey.entries()) {
-          if (!partial) continue;
-          res.write(`${prefixForKey(key)}${partial}\n`);
-          partialByKey.set(key, "");
-        }
-      };
-
-      return { writeChunk, flush };
-    })();
-
-    const onOutput = !wantsJson
-      ? (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
-          outputWriter.writeChunk(phase, stream, data);
-        }
-      : undefined;
-
-    const result = await pullAndRun(effectiveConfig.repoPath, effectiveConfig.runScript, {
-      timeoutMs: effectiveConfig.runTimeoutMs,
-      onOutput,
-    });
-    const finishedAt = new Date();
-
-    let logInfo:
-      | {
-          id: string;
-          json: string;
-          log: string;
-        }
-      | {
-          error: string;
-          details: string;
-        }
-      | undefined;
-    try {
-      const files = await writeDeployLogs({
-        repoPath: effectiveConfig.repoPath,
-        runScript: result.runScriptApplied ?? effectiveConfig.runScript,
-        startedAt,
-        finishedAt,
-        result,
-      });
-      logInfo = {
-        id: files.id,
-        json: files.jsonPathRelativeToRepo,
-        log: files.textPathRelativeToRepo,
-      };
-    } catch (err) {
-      // Logging failure should never prevent the deployment response.
-      // The server will still return the pull/run output.
-      const details = err instanceof Error ? err.message : String(err);
-      console.error(`shiphook: failed to write deploy logs: ${details}`);
-      logInfo = { error: "failed to write deploy logs", details };
-      if (!wantsJson) {
-        res.write(`[log] failed to write deploy logs: ${details}\n`);
+      // Default: stream deploy output as plain text so GitHub Actions can show it live.
+      if (wantsJson) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+      } else {
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.write(`[start] shiphook deploy\n`);
       }
-    }
 
-    if (wantsJson) {
-      const body = {
-        ok: result.success,
-        pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
-        run: {
-          stdout: result.runStdout,
-          stderr: result.runStderr,
-          exitCode: result.runExitCode,
-        },
-        error: result.error,
-        log: logInfo,
-      };
-      res.end(JSON.stringify(body));
-      return;
-    }
+      const startedAt = new Date();
 
-    outputWriter.flush();
+      const outputWriter = (() => {
+        // Keep partial lines per (phase, stream) so we can prefix each emitted line.
+        const partialByKey = new Map<string, string>();
+        const prefixForKey = (key: string) => {
+          // key format: `${phase}:${stream}`
+          const [phase, stream] = key.split(":");
+          return `[${phase}] ${stream}: `;
+        };
 
-    const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
-    res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
-    res.end();
+        const writeChunk = (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
+          const key = `${phase}:${stream}`;
+          const prev = partialByKey.get(key) ?? "";
+          const next = prev + data;
+          const parts = next.split("\n");
+
+          // If chunk ended with newline, last part is "" and should flush.
+          const completeParts = parts.slice(0, -1);
+          const lastPart = parts[parts.length - 1] ?? "";
+
+          for (const line of completeParts) {
+            res.write(`${prefixForKey(key)}${line}\n`);
+          }
+          partialByKey.set(key, lastPart);
+        };
+
+        const flush = () => {
+          for (const [key, partial] of partialByKey.entries()) {
+            if (!partial) continue;
+            res.write(`${prefixForKey(key)}${partial}\n`);
+            partialByKey.set(key, "");
+          }
+        };
+
+        return { writeChunk, flush };
+      })();
+
+      const onOutput = !wantsJson
+        ? (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
+            outputWriter.writeChunk(phase, stream, data);
+          }
+        : undefined;
+
+      const result = await pullAndRun(matchedApp.repoPath, matchedApp.runScript, {
+        timeoutMs: matchedApp.runTimeoutMs,
+        onOutput,
+      });
+      const finishedAt = new Date();
+
+      let logInfo:
+        | {
+            id: string;
+            json: string;
+            log: string;
+          }
+        | {
+            error: string;
+            details: string;
+          }
+        | undefined;
+      try {
+        const files = await writeDeployLogs({
+          repoPath: matchedApp.repoPath,
+          runScript: result.runScriptApplied ?? matchedApp.runScript,
+          startedAt,
+          finishedAt,
+          result,
+        });
+        logInfo = {
+          id: files.id,
+          json: files.jsonPathRelativeToRepo,
+          log: files.textPathRelativeToRepo,
+        };
+      } catch (err) {
+        // Logging failure should never prevent the deployment response.
+        // The server will still return the pull/run output.
+        const details = err instanceof Error ? err.message : String(err);
+        console.error(`shiphook: failed to write deploy logs: ${details}`);
+        logInfo = { error: "failed to write deploy logs", details };
+        if (!wantsJson) {
+          res.write(`[log] failed to write deploy logs: ${details}\n`);
+        }
+      }
+
+      if (wantsJson) {
+        const body = {
+          ok: result.success,
+          pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
+          run: {
+            stdout: result.runStdout,
+            stderr: result.runStderr,
+            exitCode: result.runExitCode,
+          },
+          error: result.error,
+          log: logInfo,
+        };
+        res.end(JSON.stringify(body));
+        return;
+      }
+
+      outputWriter.flush();
+
+      const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
+      res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
+      res.end();
+    });
   });
 
   return {

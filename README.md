@@ -18,7 +18,7 @@ Shiphook is aimed at **indie projects**, **small SaaS**, and **open source** tea
 
 1. You run the Shiphook HTTP server in (or next to) your app repo.
 2. Your Git host sends a webhook when you push.
-3. Shiphook verifies a shared secret, runs **`git pull`**, reloads **`shiphook.yaml` from the repo when it lives in that tree**, and runs your **`runScript`** (build, restart containers, etc.).
+3. Shiphook routes the request by host/path, verifies the matched app secret, runs **`git pull`**, reloads **`shiphook.yaml` from the repo when it lives in that tree**, and runs your **`runScript`** (build, restart containers, etc.).
 4. Output can stream back in the HTTP response (useful for GitHub Actions logs) or as JSON (`?format=json`).
 
 Configuration is **`shiphook.yaml`** in the repo and/or **environment variables** (env wins on conflicts).
@@ -108,7 +108,11 @@ Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or 
 
 After **`git pull`**, Shiphook reloads **repo-local** YAML when the config file lives **inside** the repo. Paths set with **`SHIPHOOK_CONFIG`** to **outside** the repo (e.g. `/etc/...`) are not re-read after pull—use repo-local config if you want each push to pick up YAML changes automatically.
 
+Multi-app mode is supported via `apps:` in `shiphook.yaml` (one process, one systemd service, multiple repos/domains). Each app defines its own `host`, `path`, `repoPath`, and `runScript`; if app `secret` is omitted, Shiphook auto-generates and persists a per-app secret file on first run. Requests for different apps run concurrently, while requests for the same app are serialized.
+
 Full reference: **[Documentation](https://cap-jmk-real.github.io/shiphook/)**
+
+Need step-by-step deployment examples? See **[Deployment recipes](https://cap-jmk-real.github.io/shiphook/deployment-recipes.html)** for single-app and multi-app on one server (DNS, GitHub Actions, secrets, server commands, and YAML).
 
 ---
 
