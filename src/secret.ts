@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { ShiphookConfig } from "./config.js";
 
@@ -29,9 +29,13 @@ function toFileSafeName(raw: string): string {
   return slug || "app";
 }
 
-function appSecretFilePath(repoPath: string, appName: string, host: string, path: string): string {
-  const label = toFileSafeName(`${appName}-${host}-${path}`);
-  return join(repoPath, MULTI_SECRET_DIR, `${label}.secret`);
+function appSecretFilePath(repoPath: string, host: string, path: string): string {
+  // Stable identity: host + path (independent from `apps[].name` so renames don't rotate secrets).
+  const canonical = `${host}|${path}`;
+  const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+  // Readable prefix based on host/path only; hash provides fixed-length uniqueness.
+  const label = toFileSafeName(`${host}-${path}`);
+  return join(repoPath, MULTI_SECRET_DIR, `${label}-${hash}.secret`);
 }
 
 /**
@@ -94,13 +98,13 @@ export async function ensureWebhookSecrets(config: ShiphookConfig): Promise<Ensu
         appName: app.name,
         host: app.host,
         path: app.path,
-        secretFilePath: appSecretFilePath(app.repoPath, app.name, app.host, app.path),
+        secretFilePath: appSecretFilePath(app.repoPath, app.host, app.path),
         source: "yaml",
       });
       continue;
     }
 
-    const secretFilePath = appSecretFilePath(app.repoPath, app.name, app.host, app.path);
+    const secretFilePath = appSecretFilePath(app.repoPath, app.host, app.path);
     if (existsSync(secretFilePath)) {
       const onDisk = (await readFile(secretFilePath, "utf-8")).trim();
       if (nonEmptyString(onDisk)) {

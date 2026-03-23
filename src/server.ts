@@ -1,4 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { resolve as resolvePath } from "node:path";
 import { loadConfig, type ShiphookAppConfig, type ShiphookConfig } from "./config.js";
 import { ensureWebhookSecret, ensureWebhookSecrets } from "./secret.js";
 import { pullAndRun } from "./pull-and-run.js";
@@ -61,9 +62,14 @@ export function createShiphookServer(
     };
   };
 
-  const hostWithoutPort = (hostHeader: string): string => hostHeader.trim().toLowerCase().replace(/:\d+$/, "");
+  const normalizeHostForRouting = (hostHeader: string): string => {
+    // Match config.ts normalization (trim, lowercase, strip trailing dot, then remove :port suffix).
+    return hostHeader.trim().toLowerCase().replace(/\.$/, "").replace(/:\d+$/, "");
+  };
 
-  const routeKey = (app: ShiphookAppConfig): string => `${app.host}|${app.path}`;
+  // Serialize per working tree/repo so pull + run never overlap for the same checkout.
+  const deployLockKey = (app: ShiphookAppConfig): string =>
+    `${resolvePath(app.repoPath)}|${app.host}|${app.path}`;
 
   const resolveAppForRequest = (c: ShiphookConfig, req: IncomingMessage): ShiphookAppConfig | null => {
     const urlRaw = req.url ?? "";
@@ -76,7 +82,7 @@ export function createShiphookServer(
     }
 
     const hostHeader = req.headers.host;
-    const host = typeof hostHeader === "string" ? hostWithoutPort(hostHeader) : "";
+    const host = typeof hostHeader === "string" ? normalizeHostForRouting(hostHeader) : "";
     if (!host) return null;
 
     for (const app of apps) {
@@ -87,7 +93,7 @@ export function createShiphookServer(
   };
 
   const enqueueAppDeploy = async <T>(app: ShiphookAppConfig, task: () => Promise<T>): Promise<T> => {
-    const key = routeKey(app);
+    const key = deployLockKey(app);
     const prev = appTailByRoute.get(key) ?? Promise.resolve();
     const run = prev.then(task, task);
     const tail = run.then(() => undefined, () => undefined);

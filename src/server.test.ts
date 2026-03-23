@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createShiphookServer } from "./server.js";
 import type { ShiphookConfig } from "./config.js";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -230,8 +230,14 @@ describe("createShiphookServer", () => {
 
   it("isolates auth per matched app route", async () => {
     await rm(join(testDir, "shiphook.yaml"), { force: true });
-    await writeFile(join(testDir, "deploy-a.js"), "console.log('a');");
-    await writeFile(join(testDir, "deploy-b.js"), "console.log('b');");
+    const repoA = join(testDir, "repo-a");
+    const repoB = join(testDir, "repo-b");
+    await rm(repoA, { recursive: true, force: true });
+    await rm(repoB, { recursive: true, force: true });
+    await mkdir(repoA, { recursive: true });
+    await mkdir(repoB, { recursive: true });
+    await writeFile(join(repoA, "deploy-a.js"), "console.log('a');");
+    await writeFile(join(repoB, "deploy-b.js"), "console.log('b');");
 
     const server = createShiphookServer({
       ...config,
@@ -241,7 +247,7 @@ describe("createShiphookServer", () => {
           name: "app-a",
           host: "127.0.0.1",
           path: "/deploy-a",
-          repoPath: testDir,
+          repoPath: repoA,
           runScript: "node deploy-a.js",
           secret: "secret-a",
           runTimeoutMs: 2000,
@@ -250,7 +256,7 @@ describe("createShiphookServer", () => {
           name: "app-b",
           host: "localhost",
           path: "/deploy-b",
-          repoPath: testDir,
+          repoPath: repoB,
           runScript: "node deploy-b.js",
           secret: "secret-b",
           runTimeoutMs: 2000,
@@ -281,12 +287,18 @@ describe("createShiphookServer", () => {
 
   it("runs different apps concurrently", async () => {
     await rm(join(testDir, "shiphook.yaml"), { force: true });
+    const repoA = join(testDir, "repo-conc-a");
+    const repoB = join(testDir, "repo-conc-b");
+    await rm(repoA, { recursive: true, force: true });
+    await rm(repoB, { recursive: true, force: true });
+    await mkdir(repoA, { recursive: true });
+    await mkdir(repoB, { recursive: true });
     await writeFile(
-      join(testDir, "sleep-a.js"),
+      join(repoA, "sleep-a.js"),
       "setTimeout(() => { console.log('done-a'); }, 400);"
     );
     await writeFile(
-      join(testDir, "sleep-b.js"),
+      join(repoB, "sleep-b.js"),
       "setTimeout(() => { console.log('done-b'); }, 400);"
     );
 
@@ -298,7 +310,7 @@ describe("createShiphookServer", () => {
           name: "app-a",
           host: "127.0.0.1",
           path: "/a",
-          repoPath: testDir,
+          repoPath: repoA,
           runScript: "node sleep-a.js",
           secret: "secret-a",
           runTimeoutMs: 3000,
@@ -307,7 +319,7 @@ describe("createShiphookServer", () => {
           name: "app-b",
           host: "localhost",
           path: "/b",
-          repoPath: testDir,
+          repoPath: repoB,
           runScript: "node sleep-b.js",
           secret: "secret-b",
           runTimeoutMs: 3000,
