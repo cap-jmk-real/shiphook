@@ -69,3 +69,14 @@ Shiphook now:
 - Use `journalctl -u shiphook.service` to inspect logs (including deploys and secrets setup).
 - You can still run `shiphook deploy` manually to trigger one-off deploys; it doesn’t interfere with the service.
 
+## One service, multiple apps/domains
+
+`shiphook.service` can run a single Shiphook process that serves multiple apps via `apps:` config. This is the recommended way to host multiple repos/domains on one server:
+
+- one `shiphook.service`
+- one Shiphook process
+- multiple app routes (`host` + `path`)
+- one secret per app
+
+Different apps can deploy concurrently; deploys for the same app are serialized.
+

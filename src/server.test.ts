@@ -12,9 +12,10 @@ async function post(
   path: string,
   secret?: string,
   authorizationBearerSecret?: string,
-  opts?: { asText?: boolean }
+  opts?: { asText?: boolean; host?: string }
 ): Promise<{ status: number; body: unknown }> {
-  const url = new URL(`http://127.0.0.1:${port}${path}`);
+  const host = opts?.host ?? "127.0.0.1";
+  const url = new URL(`http://${host}:${port}${path}`);
   const headers: Record<string, string> = {};
   if (secret) headers["X-Shiphook-Secret"] = secret;
   if (authorizationBearerSecret) headers["Authorization"] = `Bearer ${authorizationBearerSecret}`;
@@ -40,9 +41,20 @@ describe("createShiphookServer", () => {
       port: 0,
       repoPath: testDir,
       runScript: "node deploy.js",
-        runTimeoutMs: 1000,
+      runTimeoutMs: 1000,
       path: "/",
       secret: "test-secret",
+      apps: [
+        {
+          name: "default",
+          host: "",
+          path: "/",
+          repoPath: testDir,
+          runScript: "node deploy.js",
+          secret: "test-secret",
+          runTimeoutMs: 1000,
+        },
+      ],
     };
   });
 
@@ -175,6 +187,17 @@ describe("createShiphookServer", () => {
         runTimeoutMs: 1000,
         path: "/",
         secret: "yaml-secret-1",
+        apps: [
+          {
+            name: "default",
+            host: "",
+            path: "/",
+            repoPath: testDir,
+            runScript: "node deploy-one.js",
+            secret: "yaml-secret-1",
+            runTimeoutMs: 1000,
+          },
+        ],
       },
       { reloadConfigEachRequest: true, reloadConfigCwd: testDir }
     );
@@ -202,6 +225,148 @@ describe("createShiphookServer", () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+    }
+  });
+
+  it("isolates auth per matched app route", async () => {
+    await rm(join(testDir, "shiphook.yaml"), { force: true });
+    await writeFile(join(testDir, "deploy-a.js"), "console.log('a');");
+    await writeFile(join(testDir, "deploy-b.js"), "console.log('b');");
+
+    const server = createShiphookServer({
+      ...config,
+      port: 3148,
+      apps: [
+        {
+          name: "app-a",
+          host: "127.0.0.1",
+          path: "/deploy-a",
+          repoPath: testDir,
+          runScript: "node deploy-a.js",
+          secret: "secret-a",
+          runTimeoutMs: 2000,
+        },
+        {
+          name: "app-b",
+          host: "localhost",
+          path: "/deploy-b",
+          repoPath: testDir,
+          runScript: "node deploy-b.js",
+          secret: "secret-b",
+          runTimeoutMs: 2000,
+        },
+      ],
+    });
+
+    await server.start();
+    try {
+      const okA = await post(3148, "/deploy-a?format=json", "secret-a", undefined, {
+        host: "127.0.0.1",
+      });
+      expect(okA.status).toBe(200);
+
+      const wrongA = await post(3148, "/deploy-a?format=json", "wrong", undefined, {
+        host: "127.0.0.1",
+      });
+      expect(wrongA.status).toBe(401);
+
+      const crossApp = await post(3148, "/deploy-a?format=json", "secret-b", undefined, {
+        host: "127.0.0.1",
+      });
+      expect(crossApp.status).toBe(401);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("runs different apps concurrently", async () => {
+    await rm(join(testDir, "shiphook.yaml"), { force: true });
+    await writeFile(
+      join(testDir, "sleep-a.js"),
+      "setTimeout(() => { console.log('done-a'); }, 400);"
+    );
+    await writeFile(
+      join(testDir, "sleep-b.js"),
+      "setTimeout(() => { console.log('done-b'); }, 400);"
+    );
+
+    const server = createShiphookServer({
+      ...config,
+      port: 3149,
+      apps: [
+        {
+          name: "app-a",
+          host: "127.0.0.1",
+          path: "/a",
+          repoPath: testDir,
+          runScript: "node sleep-a.js",
+          secret: "secret-a",
+          runTimeoutMs: 3000,
+        },
+        {
+          name: "app-b",
+          host: "localhost",
+          path: "/b",
+          repoPath: testDir,
+          runScript: "node sleep-b.js",
+          secret: "secret-b",
+          runTimeoutMs: 3000,
+        },
+      ],
+    });
+
+    await server.start();
+    try {
+      const started = Date.now();
+      const [a, b] = await Promise.all([
+        post(3149, "/a?format=json", "secret-a", undefined, { host: "127.0.0.1" }),
+        post(3149, "/b?format=json", "secret-b", undefined, { host: "localhost" }),
+      ]);
+      const elapsedMs = Date.now() - started;
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(elapsedMs).toBeLessThan(1000);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("serializes deploys targeting the same app", async () => {
+    await rm(join(testDir, "shiphook.yaml"), { force: true });
+    await writeFile(
+      join(testDir, "sleep-same.js"),
+      "setTimeout(() => { console.log('done-same'); }, 400);"
+    );
+
+    const server = createShiphookServer({
+      ...config,
+      port: 3150,
+      apps: [
+        {
+          name: "app-a",
+          host: "127.0.0.1",
+          path: "/same",
+          repoPath: testDir,
+          runScript: "node sleep-same.js",
+          secret: "secret-a",
+          runTimeoutMs: 3000,
+        },
+      ],
+    });
+
+    await server.start();
+    try {
+      const started = Date.now();
+      const [first, second] = await Promise.all([
+        post(3150, "/same?format=json", "secret-a", undefined, { host: "127.0.0.1" }),
+        post(3150, "/same?format=json", "secret-a", undefined, { host: "127.0.0.1" }),
+      ]);
+      const elapsedMs = Date.now() - started;
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(elapsedMs).toBeGreaterThanOrEqual(700);
+    } finally {
+      await server.stop();
     }
   });
 });

@@ -3,7 +3,6 @@ import { hasShiphookConfigFile, loadConfig } from "./config.js";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { tmpdir } from "node:os";
 
 async function withTempDir(callback: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "shiphook-config-"));
@@ -153,6 +152,69 @@ describe("loadConfig", () => {
       const config = loadConfig(process.env, { cwd: dir });
       expect(config.port).toBe(5555);
       expect(config.path).toBe("/deploy");
+    });
+  });
+
+  it("loads multi-app config with per-app fields", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        join(dir, "shiphook.yaml"),
+        [
+          "apps:",
+          "  - name: app-a",
+          "    host: app-a.example.com",
+          "    path: /deploy-a/",
+          "    repoPath: /srv/app-a",
+          "    runScript: npm run deploy:a",
+          "    secret: secret-a",
+          "  - name: app-b",
+          "    host: app-b.example.com",
+          "    path: /deploy-b",
+          "    repoPath: /srv/app-b",
+          "    runScript: npm run deploy:b",
+          "    secret: secret-b",
+        ].join("\n")
+      );
+      const config = loadConfig(process.env, { cwd: dir });
+      expect(config.apps).toHaveLength(2);
+      expect(config.apps[0]?.host).toBe("app-a.example.com");
+      expect(config.apps[0]?.path).toBe("/deploy-a");
+      expect(config.apps[1]?.host).toBe("app-b.example.com");
+      expect(config.apps[1]?.path).toBe("/deploy-b");
+    });
+  });
+
+  it("allows multi-app config entries with missing secrets (CLI/server can auto-generate)", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        join(dir, "shiphook.yaml"),
+        ["apps:", "  - name: app-a", "    host: app-a.example.com", "    path: /", "    repoPath: ."].join(
+          "\n"
+        )
+      );
+      const config = loadConfig(process.env, { cwd: dir });
+      expect(config.apps).toHaveLength(1);
+      expect(config.apps[0]?.secret).toBe("");
+    });
+  });
+
+  it("throws when multi-app routes duplicate host + path", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        join(dir, "shiphook.yaml"),
+        [
+          "apps:",
+          "  - name: app-a",
+          "    host: app.example.com",
+          "    path: /deploy",
+          "    secret: one",
+          "  - name: app-b",
+          "    host: app.example.com",
+          "    path: /deploy/",
+          "    secret: two",
+        ].join("\n")
+      );
+      expect(() => loadConfig(process.env, { cwd: dir })).toThrow(/duplicate app route/i);
     });
   });
 });

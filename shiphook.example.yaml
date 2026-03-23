@@ -1,5 +1,6 @@
 # Example deployment config. Copy to shiphook.yaml and adjust.
 # Env vars (SHIPHOOK_*) override these values.
+# Single-app mode:
 port: 3141
 repoPath: .          # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
@@ -8,3 +9,22 @@ runScript: npm run deploy
 runTimeoutMs: 1800000
 # secret: your-webhook-secret   # optional; if omitted, CLI auto-generates and persists one
 path: /
+
+# Multi-app mode (one Shiphook process / one systemd service):
+# Each app needs its own host + path.
+# If `secret` is omitted, Shiphook auto-generates a per-app secret file on first run.
+# apps:
+#   - name: app-a
+#     host: app-a.example.com
+#     path: /deploy
+#     repoPath: /srv/app-a
+#     runScript: npm run deploy
+#     runTimeoutMs: 1800000
+#     # secret: app-a-secret
+#   - name: app-b
+#     host: app-b.example.com
+#     path: /deploy
+#     repoPath: /srv/app-b
+#     runScript: npm run deploy
+#     runTimeoutMs: 1800000
+#     # secret: app-b-secret

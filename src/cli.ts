@@ -7,10 +7,18 @@ import * as colors from "kleur/colors";
 import { loadConfig, type ShiphookConfig } from "./config.js";
 import { createShiphookServer } from "./server.js";
 import { pullAndRun } from "./pull-and-run.js";
-import { ensureWebhookSecret, type EnsureSecretResult } from "./secret.js";
+import {
+  ensureWebhookSecret,
+  ensureWebhookSecrets,
+  type EnsureAppSecretsResult,
+  type EnsureSecretResult,
+} from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 
 type CliCommand = "server" | "deploy" | "setup-https" | "version";
+function isMultiAppConfig(config: ShiphookConfig): boolean {
+  return config.apps.length > 1 || (config.apps.length === 1 && config.apps[0]?.host.trim() !== "");
+}
 
 function parseCommand(argv: string[]): CliCommand {
   const cmd = argv[2];
@@ -215,10 +223,12 @@ async function runDeploy() {
 /** Prints the same Server + Auth summary as after `server.start()` (and surfaces the webhook secret on a TTY). */
 function printShiphookServerSummary(
   config: ShiphookConfig,
-  meta: EnsureSecretResult,
+  meta?: EnsureSecretResult,
+  appSecretMeta?: EnsureAppSecretsResult[],
   options?: { bootstrapSystemd?: boolean }
 ) {
-  const { source, secretFilePath } = meta;
+  const source = meta?.source;
+  const secretFilePath = meta?.secretFilePath;
   const path = config.path === "/" ? "" : config.path;
   const v = getShiphookVersion();
   const versionLabel = v ? ` v${v}` : "";
@@ -244,38 +254,70 @@ function printShiphookServerSummary(
       `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}${repoLabelExtra}\n` +
       `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
   );
+  const multiMode = isMultiAppConfig(config);
+  if (multiMode) {
+    console.log(`${colors.bold("  Apps:")}  ${colors.white(String(config.apps.length))}`);
+    for (const app of config.apps) {
+      const host = app.host || "(any-host)";
+      console.log(
+        `${colors.bold("    -")} ${colors.white(app.name)} ${colors.dim(
+          `(${host}${app.path === "/" ? "" : app.path})`
+        )}`
+      );
+    }
+    console.log("");
+  }
   console.log(colors.bold("Auth"));
   console.log(`  Mode:   ${colors.white("required")}`);
-  console.log(`  Source: ${colors.white(String(source))}`);
-  if (source === "generated") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
-  } else if (source === "file") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+  if (multiMode) {
+    console.log(`  Source: ${colors.white("per-app config secrets")}`);
+    const generatedCount = (appSecretMeta ?? []).filter((m) => m.source === "generated").length;
+    const fileLoadedCount = (appSecretMeta ?? []).filter((m) => m.source === "file").length;
+    if (generatedCount > 0 || fileLoadedCount > 0) {
+      console.log(
+        `  App secrets: ${colors.white(
+          `${generatedCount} generated, ${fileLoadedCount} loaded from files`
+        )}`
+      );
+    } else {
+      console.log(`  App secrets: ${colors.white("from config")}`);
+    }
+  } else if (source && secretFilePath) {
+    console.log(`  Source: ${colors.white(String(source))}`);
+    if (source === "generated") {
+      console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+    } else if (source === "file") {
+      console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+    } else {
+      console.log(`  Loaded from: ${colors.white(String(source))}`);
+      console.log(
+        `  Secret file: ${colors.white(
+          `${String(secretFilePath)} (not persisted by Shiphook for ${source})`
+        )}`
+      );
+    }
   } else {
-    console.log(`  Loaded from: ${colors.white(String(source))}`);
-    console.log(
-      `  Secret file: ${colors.white(
-        `${String(secretFilePath)} (not persisted by Shiphook for ${source})`
-      )}`
-    );
+    console.log(`  Source: ${colors.white("unknown")}`);
   }
 
-  const secretTrim = String(config.secret ?? "").trim();
-  if (process.stdout.isTTY && secretTrim.length > 0) {
-    console.log("");
-    console.log(
-      colors.bold(
-        colors.green("GitHub webhook “Secret” value (copy for your repo’s webhook settings):")
-      )
-    );
-    console.log(`  ${colors.white(secretTrim)}`);
-    console.log("");
-  } else if (secretTrim.length > 0) {
-    console.log(
-      `  Secret value: ${colors.dim(
-        "(omitted on non-TTY; read .shiphook.secret, shiphook.yaml, or SHIPHOOK_SECRET)"
-      )}`
-    );
+  if (!multiMode) {
+    const secretTrim = String(config.secret ?? "").trim();
+    if (process.stdout.isTTY && secretTrim.length > 0) {
+      console.log("");
+      console.log(
+        colors.bold(
+          colors.green("GitHub webhook “Secret” value (copy for your repo’s webhook settings):")
+        )
+      );
+      console.log(`  ${colors.white(secretTrim)}`);
+      console.log("");
+    } else if (secretTrim.length > 0) {
+      console.log(
+        `  Secret value: ${colors.dim(
+          "(omitted on non-TTY; read .shiphook.secret, shiphook.yaml, or SHIPHOOK_SECRET)"
+        )}`
+      );
+    }
   }
 }
 
@@ -384,10 +426,17 @@ async function main() {
     }
   }
 
-  const secretMeta = await ensureWebhookSecret(config);
+  const multiMode = isMultiAppConfig(config);
+  let secretMeta: EnsureSecretResult | undefined;
+  let appSecretMeta: EnsureAppSecretsResult[] | undefined;
+  if (multiMode) {
+    appSecretMeta = await ensureWebhookSecrets(config);
+  } else {
+    secretMeta = await ensureWebhookSecret(config);
+  }
 
   if (exitingAfterHttpsBootstrap) {
-    printShiphookServerSummary(config, secretMeta, { bootstrapSystemd: true });
+    printShiphookServerSummary(config, secretMeta, appSecretMeta, { bootstrapSystemd: true });
     console.log(colors.bold(colors.green("Done. Shiphook is running in the background via systemd.")));
     console.log("  Check status:  sudo systemctl status shiphook.service");
     console.log("  Follow logs:   sudo journalctl -u shiphook.service -f");
@@ -404,7 +453,7 @@ async function main() {
     reloadConfigCwd: process.cwd(),
   });
   await server.start();
-  printShiphookServerSummary(config, secretMeta);
+  printShiphookServerSummary(config, secretMeta, appSecretMeta);
 }
 
 main();
