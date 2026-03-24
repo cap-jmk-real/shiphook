@@ -531,7 +531,29 @@ install_shiphook_systemd_unit() {
     svc_group="root"
   fi
 
+  find_existing_unit_for_workdir() {
+    local target_workdir=$1 unit_file
+    for unit_file in /etc/systemd/system/*.service; do
+      [[ -f "$unit_file" ]] || continue
+      if grep -q "^WorkingDirectory=${target_workdir}$" "$unit_file"; then
+        printf '%s\n' "$unit_file"
+        return 0
+      fi
+    done
+    return 1
+  }
+
   local unit_path="${SYSTEMD_UNIT_PATH}"
+  local existing_workdir_unit=""
+  existing_workdir_unit=$(find_existing_unit_for_workdir "$workdir" || true)
+  if [[ -n "$existing_workdir_unit" ]] && [[ "$existing_workdir_unit" != "$unit_path" ]] && [[ "${SHIPHOOK_REINSTALL_SYSTEMD:-}" != "1" ]]; then
+    echo ""
+    echo "Found existing Shiphook unit for this repo: ${existing_workdir_unit}"
+    echo "Skipping creation of ${unit_path} to avoid duplicate services for one repo."
+    echo "To replace it with this unit name, re-run with SHIPHOOK_REINSTALL_SYSTEMD=1 and clean up the old unit."
+    return 0
+  fi
+
   if [[ -e "$unit_path" ]] && [[ "${SHIPHOOK_REINSTALL_SYSTEMD:-}" != "1" ]]; then
     echo ""
     echo "${SYSTEMD_UNIT_FILE} already exists at ${unit_path}; leaving it unchanged."

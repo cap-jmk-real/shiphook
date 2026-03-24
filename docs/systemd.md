@@ -6,6 +6,8 @@ The automated **`shiphook setup-https`** script (and interactive **`shiphook`** 
 
 If the unit already exists, setup-https leaves it unchanged by default so re-running setup does not reinstall the service. To force reinstall/restart from setup, set `SHIPHOOK_REINSTALL_SYSTEMD=1`.
 
+To avoid accidental duplicates, setup-https also checks for an existing unit that already uses the same `WorkingDirectory` (same repo path). If found, it skips creating another unit name for that repo unless you force reinstall.
+
 If **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied).
 
 When **systemd starts `shiphook.service`**, the CLI won't try to restart it again (avoids restart loops). Running `shiphook` manually from an interactive terminal can restart the unit so the service comes up with updated config.
