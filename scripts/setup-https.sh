@@ -156,6 +156,36 @@ absolutize_workdir_for_systemd() {
   return 1
 }
 
+canonicalize_existing_dir() {
+  local p=$1 out
+  if [[ -z "$p" ]]; then
+    printf '\n'
+    return 0
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    out=$(realpath -m -- "$p" 2>/dev/null) || true
+    if [[ -n "$out" ]]; then
+      printf '%s\n' "${out%/}"
+      return 0
+    fi
+  fi
+  if [[ -d "$p" ]]; then
+    if command -v readlink >/dev/null 2>&1; then
+      out=$(readlink -f "$p" 2>/dev/null) || true
+      if [[ -n "$out" ]]; then
+        printf '%s\n' "${out%/}"
+        return 0
+      fi
+    fi
+    out=$(cd "$p" 2>/dev/null && pwd) || true
+    if [[ -n "$out" ]]; then
+      printf '%s\n' "${out%/}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "${p%/}"
+}
+
 # Optional: SHIPHOOK_HTTPS_DEFAULTS_FILE (set by shiphook CLI) — last domain/email/port/path for this repo.
 load_https_defaults_from_file() {
   DEFAULT_DOMAIN=""
@@ -532,21 +562,27 @@ install_shiphook_systemd_unit() {
   fi
 
   find_existing_unit_for_workdir() {
-    local target_workdir=$1 unit_file
-    for unit_file in /etc/systemd/system/*.service; do
-      [[ -f "$unit_file" ]] || continue
-      if grep -q "^WorkingDirectory=${target_workdir}$" "$unit_file"; then
-        printf '%s\n' "$unit_file"
+    local target_workdir=$1 target_norm unit_name existing_workdir existing_norm
+    target_norm=$(canonicalize_existing_dir "$target_workdir")
+
+    while IFS= read -r unit_name; do
+      [[ -n "$unit_name" ]] || continue
+      existing_workdir=$(systemctl show "$unit_name" -p WorkingDirectory --value 2>/dev/null || true)
+      [[ -n "$existing_workdir" ]] || continue
+      existing_norm=$(canonicalize_existing_dir "$existing_workdir")
+      if [[ "$existing_norm" == "$target_norm" ]]; then
+        printf '%s\n' "$unit_name"
         return 0
       fi
-    done
+    done < <(systemctl list-unit-files --no-legend --no-pager 2>/dev/null | awk '$1 ~ /^shiphook.*\.service$/ {print $1}')
+
     return 1
   }
 
   local unit_path="${SYSTEMD_UNIT_PATH}"
   local existing_workdir_unit=""
   existing_workdir_unit=$(find_existing_unit_for_workdir "$workdir" || true)
-  if [[ -n "$existing_workdir_unit" ]] && [[ "$existing_workdir_unit" != "$unit_path" ]] && [[ "${SHIPHOOK_REINSTALL_SYSTEMD:-}" != "1" ]]; then
+  if [[ -n "$existing_workdir_unit" ]] && [[ "$existing_workdir_unit" != "$SYSTEMD_UNIT_FILE" ]] && [[ "${SHIPHOOK_REINSTALL_SYSTEMD:-}" != "1" ]]; then
     echo ""
     echo "Found existing Shiphook unit for this repo: ${existing_workdir_unit}"
     echo "Skipping creation of ${unit_path} to avoid duplicate services for one repo."
