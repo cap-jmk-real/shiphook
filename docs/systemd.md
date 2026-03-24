@@ -96,7 +96,8 @@ Different apps can deploy concurrently; deploys for the same app are serialized.
 During webhook/CD setup iterations, stale nginx blocks and old Shiphook unit files are a common source of 404/405/502 surprises. Use:
 
 ```bash
-# Remove Shiphook-managed entries for one domain + shiphook*.service units
+# Remove Shiphook-managed entries for one domain
+# (matching nginx files + matching shiphook*.service units for that domain)
 shiphook cleanup --domain shiphook.example.com
 
 # Remove all Shiphook-managed nginx/systemd entries

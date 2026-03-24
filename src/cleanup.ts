@@ -40,6 +40,17 @@ export function parseCleanupTarget(argv: string[]): CleanupTarget | { error: str
   return { mode: "all" };
 }
 
+export function unitMatchesDomain(unitName: string, unitContent: string, domain: string): boolean {
+  return unitName.includes(domain) || unitContent.includes(domain);
+}
+
+export function selectDomainUnitsForCleanup(
+  units: Array<{ name: string; content: string }>,
+  domain: string
+): string[] {
+  return units.filter((u) => unitMatchesDomain(u.name, u.content, domain)).map((u) => u.name);
+}
+
 export function buildCleanupBashCommand(target: CleanupTarget): string {
   const prelude = [
     "set -euo pipefail",
@@ -49,7 +60,7 @@ export function buildCleanupBashCommand(target: CleanupTarget): string {
     "cp -a /etc/nginx \"$backup_dir/nginx-backup\"",
   ];
 
-  const systemdCleanup = [
+  const systemdCleanupAll = [
     "for u in $(systemctl list-unit-files --no-legend --no-pager 2>/dev/null | awk '$1 ~ /^shiphook.*\\.service$/ {print $1}'); do",
     "  systemctl disable --now \"$u\" || true",
     "done",
@@ -71,10 +82,25 @@ export function buildCleanupBashCommand(target: CleanupTarget): string {
       "  mv \"$f\" \"$backup_dir/nginx-files/\"",
       "done",
     ];
-    return [...prelude, ...systemdCleanup, ...allNginx, ...nginxCommon].join("; ");
+    return [...prelude, ...systemdCleanupAll, ...allNginx, ...nginxCommon].join("; ");
   }
 
   const escapedDomain = target.domain.replace(/'/g, "'\"'\"'");
+  const systemdCleanupDomain = [
+    `target_domain='${escapedDomain}'`,
+    "matched_units=''",
+    "for u in $(systemctl list-unit-files --no-legend --no-pager 2>/dev/null | awk '$1 ~ /^shiphook.*\\.service$/ {print $1}'); do",
+    "  if printf '%s' \"$u\" | grep -Fq \"$target_domain\" || systemctl cat \"$u\" 2>/dev/null | grep -Fq \"$target_domain\"; then",
+    "    systemctl disable --now \"$u\" || true",
+    "    rm -f \"/etc/systemd/system/$u\"",
+    "    matched_units='1'",
+    "  fi",
+    "done",
+    "if [ -n \"$matched_units\" ]; then",
+    "  systemctl daemon-reload || true",
+    "  systemctl reset-failed || true",
+    "fi",
+  ];
   const domainCleanup = [
     "mkdir -p \"$backup_dir/domain-files\"",
     `for f in $(grep -Rls '${escapedDomain}' /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled 2>/dev/null || true); do`,
@@ -82,7 +108,7 @@ export function buildCleanupBashCommand(target: CleanupTarget): string {
     "  mv \"$f\" \"$backup_dir/domain-files/\"",
     "done",
   ];
-  return [...prelude, ...systemdCleanup, ...domainCleanup, ...nginxCommon].join("; ");
+  return [...prelude, ...systemdCleanupDomain, ...domainCleanup, ...nginxCommon].join("; ");
 }
 
 export function runCleanup(target: CleanupTarget): boolean {

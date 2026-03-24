@@ -68,7 +68,7 @@ Same flow as a webhook: `git pull`, then your script.
 |--------|---------|
 | `shiphook` | Start the server (or systemd integration on Linux — see docs). |
 | `shiphook deploy` | Run one deploy in the foreground. |
-| `shiphook cleanup --domain <host> \| --all` | Linux cleanup helper for Shiphook systemd units + nginx files (with backup). |
+| `shiphook cleanup --domain <host> \| --all` | Linux cleanup helper for Shiphook nginx/systemd state (with backup). |
 | `shiphook version` | Print version (`-v` / `--version` also work). |
 | `shiphook setup-https` | Linux helper for nginx + Let’s Encrypt (GitHub needs HTTPS). |
 
@@ -108,10 +108,10 @@ The first model is usually easier to operate in production. The second model is 
 
 ## Cleanup during pipeline development
 
-While iterating on webhook/CD setup, it is common to accumulate stale nginx/server blocks or old `shiphook*.service` units. Use the built-in cleanup command before re-running setup:
+While iterating on webhook/CD setup, it is common to accumulate stale nginx/server blocks or old systemd units. Use the built-in cleanup command before re-running setup:
 
 ```bash
-# remove configs for one webhook domain
+# remove configs for one webhook domain (matching nginx files and systemd units)
 shiphook cleanup --domain shiphook.example.com
 
 # or remove all Shiphook-managed nginx/systemd entries
