@@ -68,6 +68,7 @@ Same flow as a webhook: `git pull`, then your script.
 |--------|---------|
 | `shiphook` | Start the server (or systemd integration on Linux — see docs). |
 | `shiphook deploy` | Run one deploy in the foreground. |
+| `shiphook cleanup --domain <host> \| --all` | Linux cleanup helper for Shiphook nginx/systemd state (with backup). |
 | `shiphook version` | Print version (`-v` / `--version` also work). |
 | `shiphook setup-https` | Linux helper for nginx + Let’s Encrypt (GitHub needs HTTPS). |
 
@@ -91,6 +92,33 @@ Hosts expect a **public HTTPS** URL. Shiphook speaks HTTP on localhost; put **ng
 On **Linux**, run **`shiphook setup-https`** or say **`y`** the first time you start `shiphook` in a TTY — the installer can install packages, configure nginx, obtain certs, and install a **systemd** unit. Details: [HTTPS setup](https://cap-jmk-real.github.io/shiphook/self-hosted-https.html).
 
 For servers without a TTY, set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`**.
+
+---
+
+## Multi-app on one server
+
+Shiphook supports two deployment models on one host:
+
+- **Single process, multi-app (recommended):** one `shiphook` process with one `shiphook.yaml` that uses `apps:` and routes by `host + path`.
+- **Per-app process:** one repo + service per app/domain (often one local port per app).
+
+The first model is usually easier to operate in production. The second model is useful while iterating on individual app pipelines.
+
+---
+
+## Cleanup during pipeline development
+
+While iterating on webhook/CD setup, it is common to accumulate stale nginx/server blocks or old systemd units. Use the built-in cleanup command before re-running setup:
+
+```bash
+# remove configs for one webhook domain (matching nginx files and systemd units)
+shiphook cleanup --domain shiphook.example.com
+
+# or remove all Shiphook-managed nginx/systemd entries
+shiphook cleanup --all
+```
+
+The cleanup command creates a timestamped nginx backup before applying changes.
 
 ---
 

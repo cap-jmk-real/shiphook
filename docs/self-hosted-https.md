@@ -47,7 +47,7 @@ If that unit already exists, HTTPS setup leaves it unchanged by default (useful 
 
 The setup now also checks whether the chosen local Shiphook port is already in use and fails fast to avoid collisions. You can bypass this guard with `SHIPHOOK_ALLOW_PORT_IN_USE=1` if you intentionally share a port.
 
-After **`shiphook setup-https`**, or after interactive **`shiphook`** with HTTPS **`y`**, the CLI **prints the webhook secret (TTY)** and **exits** — Shiphook stays up via **`shiphook.service`**, not in the foreground.
+After **`shiphook setup-https`**, or after interactive **`shiphook`** with HTTPS **`y`**, the CLI **prints the webhook secret (TTY)** and **exits** — Shiphook stays up via the created systemd unit (typically `shiphook-<domain>.service`), not in the foreground.
 
 Use your public URL in the Git host, for example:
 
@@ -96,3 +96,4 @@ Confirm with `getsebool httpd_can_network_connect` (should show **on**). Audit d
 
 - [Webhook setup](./webhooks) — GitHub/GitLab payload URL and secret.
 - [Configuration](./config) — `port`, `path`, `SHIPHOOK_PATH`.
+- [Systemd](./systemd) — one service vs multi-app service layouts.

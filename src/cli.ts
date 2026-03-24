@@ -14,8 +14,9 @@ import {
   type EnsureSecretResult,
 } from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
+import { parseCleanupTarget, runCleanup } from "./cleanup.js";
 
-type CliCommand = "server" | "deploy" | "setup-https" | "version";
+type CliCommand = "server" | "deploy" | "setup-https" | "cleanup" | "version";
 function isMultiAppConfig(config: ShiphookConfig): boolean {
   return config.apps.length > 1 || (config.apps.length === 1 && config.apps[0]?.host.trim() !== "");
 }
@@ -24,6 +25,7 @@ function parseCommand(argv: string[]): CliCommand {
   const cmd = argv[2];
   if (cmd === "deploy") return "deploy";
   if (cmd === "setup-https") return "setup-https";
+  if (cmd === "cleanup") return "cleanup";
   if (cmd === "version" || cmd === "-v" || cmd === "--version") return "version";
   return "server";
 }
@@ -109,6 +111,24 @@ function runSetupHttpsCliCommand(): void {
   const config = loadConfig();
   const repoAbs = resolve(config.repoPath);
   const ok = invokeSetupHttpsScript(repoAbs, config.runTimeoutMs);
+  process.exitCode = ok ? 0 : 1;
+}
+
+/** `shiphook cleanup --domain <host>` or `shiphook cleanup --all` — remove shiphook systemd + nginx configs safely. */
+function runCleanupCliCommand(argv: string[]): void {
+  if (process.platform !== "linux") {
+    console.error("shiphook cleanup is only supported on Linux hosts.");
+    process.exitCode = 1;
+    return;
+  }
+  const parsed = parseCleanupTarget(argv);
+  if ("error" in parsed) {
+    console.error(`shiphook cleanup: ${parsed.error}`);
+    console.error("Usage: shiphook cleanup --domain <host> | --all");
+    process.exitCode = 1;
+    return;
+  }
+  const ok = runCleanup(parsed);
   process.exitCode = ok ? 0 : 1;
 }
 
@@ -357,6 +377,10 @@ async function main() {
     runSetupHttpsCliCommand();
     return;
   }
+  if (command === "cleanup") {
+    runCleanupCliCommand(process.argv);
+    return;
+  }
   if (command === "deploy") {
     await runDeploy();
     return;
@@ -459,11 +483,12 @@ async function main() {
 
   if (exitingAfterHttpsBootstrap) {
     const runningUnits = listRunningShiphookSystemdUnits();
-    printShiphookServerSummary(config, secretMeta, appSecretMeta, {
-      bootstrapSystemd: true,
-      systemdUnits: runningUnits,
-    });
-    console.log(colors.bold(colors.green("Done. Shiphook is running in the background via systemd.")));
+    // Do not print Server URL summary from the pre-bootstrap config snapshot:
+    // setup-https may have just changed path/port via systemd env, and showing the old
+    // in-memory values is confusing. The setup script already prints authoritative URL/Proxy.
+    console.log(
+      colors.bold(colors.green("Done. HTTPS bootstrap completed and Shiphook is running via systemd."))
+    );
     if (runningUnits.length > 0) {
       const unit = runningUnits[0];
       console.log(`  Check status:  sudo systemctl status ${unit}`);
