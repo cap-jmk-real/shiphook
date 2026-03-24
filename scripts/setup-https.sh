@@ -283,7 +283,39 @@ fi
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONF_D="/etc/nginx/conf.d"
-SITE_NAME="shiphook"
+# Keep one nginx vhost file per domain so repeated setup runs add hosts
+# instead of replacing the previous host's config.
+DOMAIN_SLUG="${DOMAIN,,}"
+SITE_NAME_PREFIX="shiphook-"
+SITE_NAME_MAX_LEN=240
+
+short_domain_hash() {
+  local input=$1 hash=""
+  if command -v sha1sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | sha1sum | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | shasum -a 1 | awk '{print $1}')
+  elif command -v md5sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | md5sum | awk '{print $1}')
+  elif command -v md5 >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | md5 | awk '{print $NF}')
+  else
+    hash=$(printf '%s' "$input" | cksum | awk '{print $1}')
+  fi
+  printf '%s' "${hash:0:8}"
+}
+
+SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}"
+if (( ${#SITE_NAME} > SITE_NAME_MAX_LEN )); then
+  DOMAIN_HASH=$(short_domain_hash "$DOMAIN")
+  # Reserve room for: prefix + truncated slug + "-" + hash.
+  MAX_DOMAIN_SLUG_LEN=$((SITE_NAME_MAX_LEN - ${#SITE_NAME_PREFIX} - 1 - ${#DOMAIN_HASH}))
+  if (( MAX_DOMAIN_SLUG_LEN < 1 )); then
+    MAX_DOMAIN_SLUG_LEN=1
+  fi
+  DOMAIN_SLUG="${DOMAIN_SLUG:0:MAX_DOMAIN_SLUG_LEN}"
+  SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}-${DOMAIN_HASH}"
+fi
 
 # Align nginx upstream timeouts with Shiphook's configured deploy timeout.
 # Shiphook's runTimeoutMs can be set via shiphook.yaml (default: 30 minutes).
