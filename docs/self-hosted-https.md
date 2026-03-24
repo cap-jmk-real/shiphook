@@ -28,7 +28,7 @@ The setup script will **prompt** for:
 |--------|---------|
 | **Domain** | FQDN that points at this server (DNS A/AAAA must be set first). |
 | **Email** | Let’s Encrypt account / expiry notices. |
-| **Local Shiphook port** | Port Shiphook listens on (defaults to `3141`, and setup suggests the next free port when needed). |
+| **Local Shiphook port** | Port Shiphook listens on (prefills with your saved/default port, and auto-selects the next free port when that one is in use). |
 | **Webhook path** | URL path nginx proxies (default `/`, same as `SHIPHOOK_PATH` / `shiphook.yaml` `path`). |
 
 When you run **`shiphook setup-https`** or interactive **`shiphook`** → HTTPS **`y`** from a repo directory, the CLI passes **`SHIPHOOK_HTTPS_DEFAULTS_FILE`** pointing at **`.shiphook/setup-https.defaults`** in that repo. After a **successful** run, the script **writes** that file (domain, email, port, path); the **next** run **pre-fills** the prompts (press **Enter** to accept). The file is listed in **`.gitignore`** so it stays local (optional: commit a template without secrets if your team wants shared defaults).
