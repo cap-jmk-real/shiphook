@@ -64,6 +64,33 @@ maybe_open_firewalld() {
   fi
 }
 
+is_tcp_port_listening() {
+  local p=$1
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn | awk '{print $4}' | grep -qE "(^|[:.])${p}$"
+    return $?
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|[:.])${p}$"
+    return $?
+  fi
+  return 1
+}
+
+next_available_port() {
+  local start=$1 p
+  if ! [[ "$start" =~ ^[0-9]+$ ]] || (( start < 1 || start > 65535 )); then
+    start=3141
+  fi
+  for (( p=start; p<=65535; p++ )); do
+    if ! is_tcp_port_listening "$p"; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+  printf '%s\n' "$start"
+}
+
 # RHEL/Alma/Rocky/Fedora: SELinux blocks nginx (httpd_t) from connecting to unreserved ports (e.g. 3141).
 # Without this, nginx error log shows: connect() to 127.0.0.1:PORT failed (13: Permission denied).
 maybe_selinux_httpd_can_network_connect() {
@@ -201,8 +228,20 @@ read -r -p "Domain (e.g. deploy.example.com) [${DEFAULT_DOMAIN:-}]: " DOMAIN
 DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
 read -r -p "Email for Let's Encrypt [${DEFAULT_EMAIL:-}]: " EMAIL
 EMAIL="${EMAIL:-$DEFAULT_EMAIL}"
-read -r -p "Local Shiphook port [${DEFAULT_PORT:-3141}]: " PORT
-PORT="${PORT:-${DEFAULT_PORT:-3141}}"
+PORT_PROMPT_DEFAULT="${DEFAULT_PORT:-3141}"
+if [[ -z "${DEFAULT_PORT:-}" ]]; then
+  NEXT_FREE_PORT=$(next_available_port 3141)
+  PORT_PROMPT_DEFAULT="$NEXT_FREE_PORT"
+fi
+if [[ "$PORT_PROMPT_DEFAULT" =~ ^[0-9]+$ ]] && is_tcp_port_listening "$PORT_PROMPT_DEFAULT"; then
+  NEXT_FREE_PORT=$(next_available_port "$PORT_PROMPT_DEFAULT")
+  if [[ "$NEXT_FREE_PORT" != "$PORT_PROMPT_DEFAULT" ]]; then
+    echo "Port ${PORT_PROMPT_DEFAULT} appears in use; suggesting ${NEXT_FREE_PORT}."
+    PORT_PROMPT_DEFAULT="$NEXT_FREE_PORT"
+  fi
+fi
+read -r -p "Local Shiphook port [${PORT_PROMPT_DEFAULT}]: " PORT
+PORT="${PORT:-$PORT_PROMPT_DEFAULT}"
 read -r -p "Webhook URL path on this host [${DEFAULT_WEBHOOK_PATH:-/}]: " WEBHOOK_PATH
 WEBHOOK_PATH="${WEBHOOK_PATH:-${DEFAULT_WEBHOOK_PATH:-/}}"
 
@@ -247,6 +286,56 @@ if ! [[ "$WEBHOOK_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
   exit 1
 fi
 
+# Build stable, per-domain names for nginx and (by default) systemd unit files.
+SITE_NAME_PREFIX="shiphook-"
+SITE_NAME_MAX_LEN=240
+
+short_domain_hash() {
+  local input=$1 hash=""
+  if command -v sha1sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | sha1sum | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | shasum -a 1 | awk '{print $1}')
+  elif command -v md5sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | md5sum | awk '{print $1}')
+  elif command -v md5 >/dev/null 2>&1; then
+    hash=$(printf '%s' "$input" | md5 | awk '{print $NF}')
+  else
+    hash=$(printf '%s' "$input" | cksum | awk '{print $1}')
+  fi
+  printf '%s' "${hash:0:8}"
+}
+
+DOMAIN_SLUG="${DOMAIN,,}"
+SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}"
+if (( ${#SITE_NAME} > SITE_NAME_MAX_LEN )); then
+  DOMAIN_HASH=$(short_domain_hash "$DOMAIN")
+  # Reserve room for: prefix + truncated slug + "-" + hash.
+  MAX_DOMAIN_SLUG_LEN=$((SITE_NAME_MAX_LEN - ${#SITE_NAME_PREFIX} - 1 - ${#DOMAIN_HASH}))
+  if (( MAX_DOMAIN_SLUG_LEN < 1 )); then
+    MAX_DOMAIN_SLUG_LEN=1
+  fi
+  DOMAIN_SLUG="${DOMAIN_SLUG:0:MAX_DOMAIN_SLUG_LEN}"
+  SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}-${DOMAIN_HASH}"
+fi
+
+SYSTEMD_SERVICE_BASE="${SHIPHOOK_SYSTEMD_SERVICE_NAME:-$SITE_NAME}"
+SYSTEMD_SERVICE_BASE="${SYSTEMD_SERVICE_BASE%.service}"
+SYSTEMD_UNIT_FILE="${SYSTEMD_SERVICE_BASE}.service"
+
+SYSTEMD_UNIT_PATH="/etc/systemd/system/${SYSTEMD_UNIT_FILE}"
+if is_tcp_port_listening "$PORT"; then
+  if [[ -f "$SYSTEMD_UNIT_PATH" ]] && grep -q "^Environment=SHIPHOOK_PORT=${PORT}$" "$SYSTEMD_UNIT_PATH"; then
+    echo "Port ${PORT} is already in use by existing ${SYSTEMD_UNIT_FILE}; continuing."
+  elif [[ "${SHIPHOOK_ALLOW_PORT_IN_USE:-}" == "1" ]]; then
+    echo "Warning: port ${PORT} appears in use, but SHIPHOOK_ALLOW_PORT_IN_USE=1 is set; continuing."
+  else
+    echo "Error: port ${PORT} already appears to be in use."
+    echo "Choose a unique local Shiphook port for this website/service, or set SHIPHOOK_ALLOW_PORT_IN_USE=1 to bypass this check."
+    exit 1
+  fi
+fi
+
 install_packages_debian() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
@@ -285,37 +374,6 @@ NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONF_D="/etc/nginx/conf.d"
 # Keep one nginx vhost file per domain so repeated setup runs add hosts
 # instead of replacing the previous host's config.
-DOMAIN_SLUG="${DOMAIN,,}"
-SITE_NAME_PREFIX="shiphook-"
-SITE_NAME_MAX_LEN=240
-
-short_domain_hash() {
-  local input=$1 hash=""
-  if command -v sha1sum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$input" | sha1sum | awk '{print $1}')
-  elif command -v shasum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$input" | shasum -a 1 | awk '{print $1}')
-  elif command -v md5sum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$input" | md5sum | awk '{print $1}')
-  elif command -v md5 >/dev/null 2>&1; then
-    hash=$(printf '%s' "$input" | md5 | awk '{print $NF}')
-  else
-    hash=$(printf '%s' "$input" | cksum | awk '{print $1}')
-  fi
-  printf '%s' "${hash:0:8}"
-}
-
-SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}"
-if (( ${#SITE_NAME} > SITE_NAME_MAX_LEN )); then
-  DOMAIN_HASH=$(short_domain_hash "$DOMAIN")
-  # Reserve room for: prefix + truncated slug + "-" + hash.
-  MAX_DOMAIN_SLUG_LEN=$((SITE_NAME_MAX_LEN - ${#SITE_NAME_PREFIX} - 1 - ${#DOMAIN_HASH}))
-  if (( MAX_DOMAIN_SLUG_LEN < 1 )); then
-    MAX_DOMAIN_SLUG_LEN=1
-  fi
-  DOMAIN_SLUG="${DOMAIN_SLUG:0:MAX_DOMAIN_SLUG_LEN}"
-  SITE_NAME="${SITE_NAME_PREFIX}${DOMAIN_SLUG}-${DOMAIN_HASH}"
-fi
 
 # Align nginx upstream timeouts with Shiphook's configured deploy timeout.
 # Shiphook's runTimeoutMs can be set via shiphook.yaml (default: 30 minutes).
@@ -473,7 +531,14 @@ install_shiphook_systemd_unit() {
     svc_group="root"
   fi
 
-  local unit_path="/etc/systemd/system/shiphook.service"
+  local unit_path="${SYSTEMD_UNIT_PATH}"
+  if [[ -e "$unit_path" ]] && [[ "${SHIPHOOK_REINSTALL_SYSTEMD:-}" != "1" ]]; then
+    echo ""
+    echo "${SYSTEMD_UNIT_FILE} already exists at ${unit_path}; leaving it unchanged."
+    echo "Set SHIPHOOK_REINSTALL_SYSTEMD=1 to force reinstall/restart from setup-https."
+    return 0
+  fi
+
   local exec_line
   exec_line="ExecStart=$(systemd_quote_arg "$node_bin") $(systemd_quote_arg "$cli_js")"
 
@@ -503,12 +568,12 @@ WantedBy=multi-user.target
 UNITEOF
 
   systemctl daemon-reload
-  systemctl enable shiphook.service
-  if systemctl restart shiphook.service; then
-    echo "shiphook.service enabled and started."
-    echo "  Logs: journalctl -u shiphook.service -f"
+  systemctl enable "${SYSTEMD_UNIT_FILE}"
+  if systemctl restart "${SYSTEMD_UNIT_FILE}"; then
+    echo "${SYSTEMD_UNIT_FILE} enabled and started."
+    echo "  Logs: journalctl -u ${SYSTEMD_UNIT_FILE} -f"
   else
-    echo "Warning: shiphook.service failed to start (is port ${PORT} already in use?). Check: journalctl -u shiphook.service -n 50"
+    echo "Warning: ${SYSTEMD_UNIT_FILE} failed to start (is port ${PORT} already in use?). Check: journalctl -u ${SYSTEMD_UNIT_FILE} -n 50"
     return 0
   fi
 }
