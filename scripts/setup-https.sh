@@ -283,7 +283,10 @@ fi
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONF_D="/etc/nginx/conf.d"
-SITE_NAME="shiphook"
+# Keep one nginx vhost file per domain so repeated setup runs add hosts
+# instead of replacing the previous host's config.
+DOMAIN_SLUG="${DOMAIN,,}"
+SITE_NAME="shiphook-${DOMAIN_SLUG}"
 
 # Align nginx upstream timeouts with Shiphook's configured deploy timeout.
 # Shiphook's runTimeoutMs can be set via shiphook.yaml (default: 30 minutes).
