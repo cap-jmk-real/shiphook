@@ -28,7 +28,7 @@ The setup script will **prompt** for:
 |--------|---------|
 | **Domain** | FQDN that points at this server (DNS A/AAAA must be set first). |
 | **Email** | Let’s Encrypt account / expiry notices. |
-| **Local Shiphook port** | Port Shiphook listens on (default `3141`). |
+| **Local Shiphook port** | Port Shiphook listens on (defaults to `3141`, and setup suggests the next free port when needed). |
 | **Webhook path** | URL path nginx proxies (default `/`, same as `SHIPHOOK_PATH` / `shiphook.yaml` `path`). |
 
 When you run **`shiphook setup-https`** or interactive **`shiphook`** → HTTPS **`y`** from a repo directory, the CLI passes **`SHIPHOOK_HTTPS_DEFAULTS_FILE`** pointing at **`.shiphook/setup-https.defaults`** in that repo. After a **successful** run, the script **writes** that file (domain, email, port, path); the **next** run **pre-fills** the prompts (press **Enter** to accept). The file is listed in **`.gitignore`** so it stays local (optional: commit a template without secrets if your team wants shared defaults).
@@ -41,7 +41,11 @@ The script will:
 2. Write an nginx site that reverse-proxies your domain + path to `http://127.0.0.1:<port>`.
 3. Run **certbot** with the nginx plugin (`--redirect` to HTTPS).
 4. Enable **Certbot auto-renew** via `certbot.timer` when the package provides it (common on systemd distros).
-5. When the CLI passes bootstrap variables (interactive **`shiphook`** answering **`y`**, or **`shiphook setup-https`**), install **`shiphook.service`** on **systemd** hosts: `WorkingDirectory` is your resolved repo path, `ExecStart` uses the same Node + `dist/cli.js` as this run, `SHIPHOOK_SKIP_HTTPS_PROMPT=1`, and the port/path you entered. Then **`systemctl enable --now shiphook`**.
+5. When the CLI passes bootstrap variables (interactive **`shiphook`** answering **`y`**, or **`shiphook setup-https`**), install a **per-domain systemd unit** on **systemd** hosts (default: `shiphook-<domain>.service`, with long domains safely truncated+hashed): `WorkingDirectory` is your resolved repo path, `ExecStart` uses the same Node + `dist/cli.js` as this run, `SHIPHOOK_SKIP_HTTPS_PROMPT=1`, and the port/path you entered. Then it enables + starts that unit.
+
+If that unit already exists, HTTPS setup leaves it unchanged by default (useful when re-running setup for the same app/domain). To force reinstall + restart from setup, run with `SHIPHOOK_REINSTALL_SYSTEMD=1`.
+
+The setup now also checks whether the chosen local Shiphook port is already in use and fails fast to avoid collisions. You can bypass this guard with `SHIPHOOK_ALLOW_PORT_IN_USE=1` if you intentionally share a port.
 
 After **`shiphook setup-https`**, or after interactive **`shiphook`** with HTTPS **`y`**, the CLI **prints the webhook secret (TTY)** and **exits** — Shiphook stays up via **`shiphook.service`**, not in the foreground.
 

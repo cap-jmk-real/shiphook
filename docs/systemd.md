@@ -2,7 +2,9 @@
 
 After HTTPS + nginx are set up, you’ll usually want Shiphook to run **in the background**, survive SSH disconnects, and start on boot. On most modern Linux distros (including AlmaLinux), use **systemd**.
 
-The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) **writes** `/etc/systemd/system/shiphook.service`, reloads systemd, and runs **`systemctl enable --now shiphook.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
+The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) creates a per-domain unit at `/etc/systemd/system/shiphook-<domain>.service` (long domains are safely truncated+hashed), reloads systemd, and runs **`systemctl enable --now <unit>.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
+
+If the unit already exists, setup-https leaves it unchanged by default so re-running setup does not reinstall the service. To force reinstall/restart from setup, set `SHIPHOOK_REINSTALL_SYSTEMD=1`.
 
 If **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied).
 
@@ -71,7 +73,12 @@ Shiphook now:
 
 ## One service, multiple apps/domains
 
-`shiphook.service` can run a single Shiphook process that serves multiple apps via `apps:` config. This is the recommended way to host multiple repos/domains on one server:
+You can run either one process for many apps (recommended) or one service per app/domain:
+
+- **Single process mode:** one unit with `apps:` config handles many repos/domains.
+- **Per-app mode:** one `shiphook-<domain>.service` per repo/domain, each on its own port.
+
+`shiphook.service` (or a custom unit name) can run a single Shiphook process that serves multiple apps via `apps:` config. This is the recommended way to host multiple repos/domains on one server:
 
 - one `shiphook.service`
 - one Shiphook process
