@@ -14,8 +14,9 @@ import {
   type EnsureSecretResult,
 } from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
+import { parseCleanupTarget, runCleanup } from "./cleanup.js";
 
-type CliCommand = "server" | "deploy" | "setup-https" | "version";
+type CliCommand = "server" | "deploy" | "setup-https" | "cleanup" | "version";
 function isMultiAppConfig(config: ShiphookConfig): boolean {
   return config.apps.length > 1 || (config.apps.length === 1 && config.apps[0]?.host.trim() !== "");
 }
@@ -24,6 +25,7 @@ function parseCommand(argv: string[]): CliCommand {
   const cmd = argv[2];
   if (cmd === "deploy") return "deploy";
   if (cmd === "setup-https") return "setup-https";
+  if (cmd === "cleanup") return "cleanup";
   if (cmd === "version" || cmd === "-v" || cmd === "--version") return "version";
   return "server";
 }
@@ -109,6 +111,24 @@ function runSetupHttpsCliCommand(): void {
   const config = loadConfig();
   const repoAbs = resolve(config.repoPath);
   const ok = invokeSetupHttpsScript(repoAbs, config.runTimeoutMs);
+  process.exitCode = ok ? 0 : 1;
+}
+
+/** `shiphook cleanup --domain <host>` or `shiphook cleanup --all` — remove shiphook systemd + nginx configs safely. */
+function runCleanupCliCommand(argv: string[]): void {
+  if (process.platform !== "linux") {
+    console.error("shiphook cleanup is only supported on Linux hosts.");
+    process.exitCode = 1;
+    return;
+  }
+  const parsed = parseCleanupTarget(argv);
+  if ("error" in parsed) {
+    console.error(`shiphook cleanup: ${parsed.error}`);
+    console.error("Usage: shiphook cleanup --domain <host> | --all");
+    process.exitCode = 1;
+    return;
+  }
+  const ok = runCleanup(parsed);
   process.exitCode = ok ? 0 : 1;
 }
 
@@ -355,6 +375,10 @@ async function main() {
   }
   if (command === "setup-https") {
     runSetupHttpsCliCommand();
+    return;
+  }
+  if (command === "cleanup") {
+    runCleanupCliCommand(process.argv);
     return;
   }
   if (command === "deploy") {

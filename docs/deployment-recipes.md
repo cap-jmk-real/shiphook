@@ -336,3 +336,4 @@ Behavior:
 - **404 Not found:** wrong domain or path (Host+path must match config).
 - **Webhook never arrives:** DNS/HTTPS not correct.
 - **Deploy command fails:** check `.shiphook/logs/*.log` in target repo.
+- **405/502 or conflicting server_name:** stale nginx or systemd state from previous setup attempts. During pipeline development, run `shiphook cleanup --domain <host>` (or `shiphook cleanup --all`) before re-running `shiphook setup-https`.

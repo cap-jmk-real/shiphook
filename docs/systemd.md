@@ -8,9 +8,9 @@ If the unit already exists, setup-https leaves it unchanged by default so re-run
 
 To avoid accidental duplicates, setup-https also checks for an existing unit that already uses the same `WorkingDirectory` (same repo path). If found, it skips creating another unit name for that repo unless you force reinstall.
 
-If **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied).
+If a Shiphook unit is already active, running `shiphook` again from an interactive terminal will restart/start the default service workflow.
 
-When **systemd starts `shiphook.service`**, the CLI won't try to restart it again (avoids restart loops). Running `shiphook` manually from an interactive terminal can restart the unit so the service comes up with updated config.
+When systemd starts Shiphook, the CLI won't try to restart it again (avoids restart loops). Running `shiphook` manually from an interactive terminal can restart the unit so the service comes up with updated config.
 
 ---
 
@@ -88,4 +88,20 @@ You can run either one process for many apps (recommended) or one service per ap
 - one secret per app
 
 Different apps can deploy concurrently; deploys for the same app are serialized.
+
+---
+
+## Cleanup helper (development/troubleshooting)
+
+During webhook/CD setup iterations, stale nginx blocks and old Shiphook unit files are a common source of 404/405/502 surprises. Use:
+
+```bash
+# Remove Shiphook-managed entries for one domain + shiphook*.service units
+shiphook cleanup --domain shiphook.example.com
+
+# Remove all Shiphook-managed nginx/systemd entries
+shiphook cleanup --all
+```
+
+The command creates a timestamped nginx backup before changing files.
 
