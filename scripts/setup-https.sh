@@ -258,11 +258,8 @@ read -r -p "Domain (e.g. deploy.example.com) [${DEFAULT_DOMAIN:-}]: " DOMAIN
 DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
 read -r -p "Email for Let's Encrypt [${DEFAULT_EMAIL:-}]: " EMAIL
 EMAIL="${EMAIL:-$DEFAULT_EMAIL}"
+# Prefer saved/default port when available; only auto-increment if that port is busy.
 PORT_PROMPT_DEFAULT="${DEFAULT_PORT:-3141}"
-if [[ -z "${DEFAULT_PORT:-}" ]]; then
-  NEXT_FREE_PORT=$(next_available_port 3141)
-  PORT_PROMPT_DEFAULT="$NEXT_FREE_PORT"
-fi
 if [[ "$PORT_PROMPT_DEFAULT" =~ ^[0-9]+$ ]] && is_tcp_port_listening "$PORT_PROMPT_DEFAULT"; then
   NEXT_FREE_PORT=$(next_available_port "$PORT_PROMPT_DEFAULT")
   if [[ "$NEXT_FREE_PORT" != "$PORT_PROMPT_DEFAULT" ]]; then

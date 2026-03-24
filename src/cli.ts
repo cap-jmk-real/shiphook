@@ -137,6 +137,21 @@ function shouldOfferHttpsPrompt(): boolean {
   return true;
 }
 
+function listRunningShiphookSystemdUnits(): string[] {
+  const r = spawnSync(
+    "systemctl",
+    ["list-units", "--type=service", "--state=running", "--no-legend", "--no-pager"],
+    { encoding: "utf-8" }
+  );
+  if (r.status !== 0) return [];
+  return String(r.stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/)[0] ?? "")
+    .filter((unit) => /^shiphook.*\.service$/.test(unit));
+}
+
 async function promptOfferHttpsSetup(): Promise<boolean> {
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({
@@ -225,7 +240,7 @@ function printShiphookServerSummary(
   config: ShiphookConfig,
   meta?: EnsureSecretResult,
   appSecretMeta?: EnsureAppSecretsResult[],
-  options?: { bootstrapSystemd?: boolean }
+  options?: { bootstrapSystemd?: boolean; systemdUnits?: string[] }
 ) {
   const source = meta?.source;
   const secretFilePath = meta?.secretFilePath;
@@ -246,8 +261,15 @@ function printShiphookServerSummary(
   const repoIsDefaultCwd =
     !process.env.SHIPHOOK_REPO_PATH && String(config.repoPath) === process.cwd();
   const repoLabelExtra = repoIsDefaultCwd ? colors.dim(" (default: current working directory)") : "";
+  const detectedUnits = options?.systemdUnits ?? [];
+  const processHint =
+    detectedUnits.length === 1
+      ? detectedUnits[0]
+      : detectedUnits.length > 1
+        ? `${detectedUnits[0]} (+${detectedUnits.length - 1} more)`
+        : "no systemd unit detected";
   const listenHint = options?.bootstrapSystemd
-    ? `http://127.0.0.1:${config.port}${path} (behind nginx HTTPS; process: shiphook.service)`
+    ? `http://127.0.0.1:${config.port}${path} (behind nginx HTTPS; process: ${processHint})`
     : `http://localhost:${config.port}${path}`;
   console.log(
     `${colors.bold("  URL: ")}  ${colors.white(listenHint)}\n` +
@@ -436,10 +458,23 @@ async function main() {
   }
 
   if (exitingAfterHttpsBootstrap) {
-    printShiphookServerSummary(config, secretMeta, appSecretMeta, { bootstrapSystemd: true });
+    const runningUnits = listRunningShiphookSystemdUnits();
+    printShiphookServerSummary(config, secretMeta, appSecretMeta, {
+      bootstrapSystemd: true,
+      systemdUnits: runningUnits,
+    });
     console.log(colors.bold(colors.green("Done. Shiphook is running in the background via systemd.")));
-    console.log("  Check status:  sudo systemctl status shiphook.service");
-    console.log("  Follow logs:   sudo journalctl -u shiphook.service -f");
+    if (runningUnits.length > 0) {
+      const unit = runningUnits[0];
+      console.log(`  Check status:  sudo systemctl status ${unit}`);
+      console.log(`  Follow logs:   sudo journalctl -u ${unit} -f`);
+      if (runningUnits.length > 1) {
+        console.log(`  Other units:   ${runningUnits.slice(1).join(", ")}`);
+      }
+    } else {
+      console.log("  Check status:  sudo systemctl list-units | grep -E '^shiphook.*\\.service'");
+      console.log("  Follow logs:   sudo journalctl -u '<shiphook-unit>' -f");
+    }
     console.log("");
     process.exit(0);
   }
