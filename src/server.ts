@@ -2,8 +2,9 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve as resolvePath } from "node:path";
 import { loadConfig, type ShiphookAppConfig, type ShiphookConfig } from "./config.js";
 import { ensureWebhookSecret, ensureWebhookSecrets } from "./secret.js";
-import { pullAndRun } from "./pull-and-run.js";
+import { pullAndRun, type DeployOutputPhase } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
+import { enqueueDeploy } from "./deploy-queue.js";
 
 /**
  * Creates an HTTP server that accepts POST on config.path, validates webhook secret,
@@ -22,7 +23,6 @@ export function createShiphookServer(
 ) {
   const reloadConfigEachRequest = options?.reloadConfigEachRequest ?? false;
   const reloadConfigCwd = options?.reloadConfigCwd ?? process.cwd();
-  const appTailByRoute = new Map<string, Promise<void>>();
 
   const validateRequiredSecret = (c: ShiphookConfig): string => {
     const s = c.secret.trim();
@@ -90,19 +90,6 @@ export function createShiphookServer(
       if (computePathMatch(app.path)(urlRaw)) return app;
     }
     return null;
-  };
-
-  const enqueueAppDeploy = async <T>(app: ShiphookAppConfig, task: () => Promise<T>): Promise<T> => {
-    const key = deployLockKey(app);
-    const prev = appTailByRoute.get(key) ?? Promise.resolve();
-    const run = prev.then(task, task);
-    const tail = run.then(() => undefined, () => undefined);
-    appTailByRoute.set(key, tail);
-    try {
-      return await run;
-    } finally {
-      if (appTailByRoute.get(key) === tail) appTailByRoute.delete(key);
-    }
   };
 
   // Validate once for startup safety.
@@ -175,125 +162,155 @@ export function createShiphookServer(
       return;
     }
 
-    await enqueueAppDeploy(matchedApp, async () => {
-      const requestUrl = new URL(req.url ?? "", "http://localhost");
-      const wantsJson = requestUrl.searchParams.get("format") === "json";
+    const requestUrl = new URL(req.url ?? "", "http://localhost");
+    const wantsJson = requestUrl.searchParams.get("format") === "json";
+    let queuePosition = 1;
+    let responseStarted = false;
 
-      // Default: stream deploy output as plain text so GitHub Actions can show it live.
+    const startResponseIfNeeded = (position: number) => {
+      if (responseStarted) return;
+      responseStarted = true;
       if (wantsJson) {
         res.writeHead(200, { "Content-Type": "application/json" });
       } else {
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-        res.write(`[start] shiphook deploy\n`);
-      }
-
-      const startedAt = new Date();
-
-      const outputWriter = (() => {
-        // Keep partial lines per (phase, stream) so we can prefix each emitted line.
-        const partialByKey = new Map<string, string>();
-        const prefixForKey = (key: string) => {
-          // key format: `${phase}:${stream}`
-          const [phase, stream] = key.split(":");
-          return `[${phase}] ${stream}: `;
-        };
-
-        const writeChunk = (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
-          const key = `${phase}:${stream}`;
-          const prev = partialByKey.get(key) ?? "";
-          const next = prev + data;
-          const parts = next.split("\n");
-
-          // If chunk ended with newline, last part is "" and should flush.
-          const completeParts = parts.slice(0, -1);
-          const lastPart = parts[parts.length - 1] ?? "";
-
-          for (const line of completeParts) {
-            res.write(`${prefixForKey(key)}${line}\n`);
-          }
-          partialByKey.set(key, lastPart);
-        };
-
-        const flush = () => {
-          for (const [key, partial] of partialByKey.entries()) {
-            if (!partial) continue;
-            res.write(`${prefixForKey(key)}${partial}\n`);
-            partialByKey.set(key, "");
-          }
-        };
-
-        return { writeChunk, flush };
-      })();
-
-      const onOutput = !wantsJson
-        ? (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
-            outputWriter.writeChunk(phase, stream, data);
-          }
-        : undefined;
-
-      const result = await pullAndRun(matchedApp.repoPath, matchedApp.runScript, {
-        timeoutMs: matchedApp.runTimeoutMs,
-        onOutput,
-      });
-      const finishedAt = new Date();
-
-      let logInfo:
-        | {
-            id: string;
-            json: string;
-            log: string;
-          }
-        | {
-            error: string;
-            details: string;
-          }
-        | undefined;
-      try {
-        const files = await writeDeployLogs({
-          repoPath: matchedApp.repoPath,
-          runScript: result.runScriptApplied ?? matchedApp.runScript,
-          startedAt,
-          finishedAt,
-          result,
-        });
-        logInfo = {
-          id: files.id,
-          json: files.jsonPathRelativeToRepo,
-          log: files.textPathRelativeToRepo,
-        };
-      } catch (err) {
-        // Logging failure should never prevent the deployment response.
-        // The server will still return the pull/run output.
-        const details = err instanceof Error ? err.message : String(err);
-        console.error(`shiphook: failed to write deploy logs: ${details}`);
-        logInfo = { error: "failed to write deploy logs", details };
-        if (!wantsJson) {
-          res.write(`[log] failed to write deploy logs: ${details}\n`);
+        if (position > 1) {
+          res.write(`[queued] waiting; position=${position}\n`);
         }
       }
+    };
 
-      if (wantsJson) {
-        const body = {
-          ok: result.success,
-          pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
-          run: {
-            stdout: result.runStdout,
-            stderr: result.runStderr,
-            exitCode: result.runExitCode,
-          },
-          error: result.error,
-          log: logInfo,
-        };
-        res.end(JSON.stringify(body));
-        return;
+    const { result: _deployResult } = await enqueueDeploy(
+      deployLockKey(matchedApp),
+      async () => {
+        startResponseIfNeeded(queuePosition);
+        if (!wantsJson) {
+          res.write(`[start] shiphook deploy\n`);
+        }
+
+        const startedAt = new Date();
+
+        const outputWriter = (() => {
+          const partialByKey = new Map<string, string>();
+          const prefixForKey = (key: string) => {
+            const [phase, stream] = key.split(":");
+            return `[${phase}] ${stream}: `;
+          };
+
+          const writeChunk = (phase: DeployOutputPhase, stream: "stdout" | "stderr", data: string) => {
+            const key = `${phase}:${stream}`;
+            const prev = partialByKey.get(key) ?? "";
+            const next = prev + data;
+            const parts = next.split("\n");
+
+            const completeParts = parts.slice(0, -1);
+            const lastPart = parts[parts.length - 1] ?? "";
+
+            for (const line of completeParts) {
+              res.write(`${prefixForKey(key)}${line}\n`);
+            }
+            partialByKey.set(key, lastPart);
+          };
+
+          const flush = () => {
+            for (const [key, partial] of partialByKey.entries()) {
+              if (!partial) continue;
+              res.write(`${prefixForKey(key)}${partial}\n`);
+              partialByKey.set(key, "");
+            }
+          };
+
+          return { writeChunk, flush };
+        })();
+
+        const onOutput = !wantsJson
+          ? (phase: DeployOutputPhase, stream: "stdout" | "stderr", data: string) => {
+              outputWriter.writeChunk(phase, stream, data);
+            }
+          : undefined;
+
+        const deployResult = await pullAndRun(matchedApp.repoPath, matchedApp.runScript, {
+          timeoutMs: matchedApp.runTimeoutMs,
+          onOutput,
+          rollbackOnFailure: effectiveConfig.rollbackOnFailure,
+        });
+        const finishedAt = new Date();
+
+        let logInfo:
+          | {
+              id: string;
+              json: string;
+              log: string;
+            }
+          | {
+              error: string;
+              details: string;
+            }
+          | undefined;
+        try {
+          const files = await writeDeployLogs({
+            repoPath: matchedApp.repoPath,
+            runScript: deployResult.runScriptApplied ?? matchedApp.runScript,
+            startedAt,
+            finishedAt,
+            result: deployResult,
+          });
+          logInfo = {
+            id: files.id,
+            json: files.jsonPathRelativeToRepo,
+            log: files.textPathRelativeToRepo,
+          };
+        } catch (err) {
+          const details = err instanceof Error ? err.message : String(err);
+          console.error(`shiphook: failed to write deploy logs: ${details}`);
+          logInfo = { error: "failed to write deploy logs", details };
+          if (!wantsJson) {
+            res.write(`[log] failed to write deploy logs: ${details}\n`);
+          }
+        }
+
+        if (wantsJson) {
+          const body = {
+            ok: deployResult.success,
+            queue: { position: queuePosition },
+            pull: {
+              success: deployResult.pullSuccess,
+              stdout: deployResult.pullStdout,
+              stderr: deployResult.pullStderr,
+            },
+            run: {
+              stdout: deployResult.runStdout,
+              stderr: deployResult.runStderr,
+              exitCode: deployResult.runExitCode,
+            },
+            rollback: deployResult.rollback ?? null,
+            error: deployResult.error,
+            log: logInfo,
+          };
+          res.end(JSON.stringify(body));
+          return deployResult;
+        }
+
+        outputWriter.flush();
+
+        const exitCodeString =
+          deployResult.runExitCode === null ? "null" : String(deployResult.runExitCode);
+        const rollbackNote = deployResult.rollback?.attempted
+          ? ` rollback=${deployResult.rollback.success ? "ok" : "failed"}`
+          : "";
+        res.write(
+          `[done] ok=${deployResult.success} exitCode=${exitCodeString} queuePosition=${queuePosition}${rollbackNote}\n`
+        );
+        res.end();
+        return deployResult;
+      },
+      {
+        onQueued: (position) => {
+          queuePosition = position;
+          startResponseIfNeeded(position);
+        },
       }
-
-      outputWriter.flush();
-
-      const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
-      res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
-      res.end();
-    });
+    );
   });
 
   return {

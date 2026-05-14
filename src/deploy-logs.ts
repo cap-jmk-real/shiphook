@@ -103,12 +103,13 @@ export async function writeDeployLogs(args: {
       stderr: args.result.runStderr,
       exitCode: args.result.runExitCode,
     },
+    rollback: args.result.rollback ?? null,
     error: args.result.error ?? null,
   };
 
   await writeFile(jsonAbsPath, JSON.stringify(payload, null, 2), { encoding: "utf-8", mode: 0o600 });
 
-  const text = [
+  const textParts = [
     `shiphook deploy log: ${id}`,
     `startedAt: ${startedAtHuman}`,
     `finishedAt: ${finishedAtHuman}`,
@@ -121,6 +122,28 @@ export async function writeDeployLogs(args: {
     `run.exitCode: ${payload.run.exitCode}`,
     `error: ${payload.error}`,
     ``,
+  ];
+
+  if (payload.rollback) {
+    textParts.push(
+      `--- rollback ---`,
+      `rollback.attempted: ${payload.rollback.attempted}`,
+      `rollback.success: ${payload.rollback.success}`,
+      `rollback.prePullSha: ${payload.rollback.prePullSha}`,
+      `rollback.resetSuccess: ${payload.rollback.resetSuccess}`,
+      `rollback.run.exitCode: ${payload.rollback.runExitCode}`,
+      `rollback.error: ${payload.rollback.error ?? ""}`,
+      ``,
+      `--- rollback stdout ---`,
+      payload.rollback.stdout,
+      ``,
+      `--- rollback stderr ---`,
+      payload.rollback.stderr,
+      ``
+    );
+  }
+
+  textParts.push(
     `--- git pull stdout ---`,
     payload.pull.stdout,
     ``,
@@ -132,8 +155,10 @@ export async function writeDeployLogs(args: {
     ``,
     `--- run stderr ---`,
     payload.run.stderr,
-    ``,
-  ].join("\n");
+    ``
+  );
+
+  const text = textParts.join("\n");
 
   await writeFile(textAbsPath, text, { encoding: "utf-8", mode: 0o600 });
 

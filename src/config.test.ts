@@ -66,6 +66,24 @@ describe("loadConfig", () => {
     expect(config.path).toBe("/webhook");
   });
 
+  it("reads rollbackOnFailure from env and yaml", async () => {
+    process.env.SHIPHOOK_ROLLBACK_ON_FAILURE = "true";
+    expect(loadConfig(process.env).rollbackOnFailure).toBe(true);
+    delete process.env.SHIPHOOK_ROLLBACK_ON_FAILURE;
+
+    await withTempDir(async (dir) => {
+      await writeFile(join(dir, "shiphook.yaml"), "rollbackOnFailure: true\n");
+      delete process.env.SHIPHOOK_ROLLBACK_ON_FAILURE;
+      delete process.env.SHIPHOOK_CONFIG;
+      expect(loadConfig(process.env, { cwd: dir }).rollbackOnFailure).toBe(true);
+    });
+  });
+
+  it("defaults rollbackOnFailure to false", () => {
+    delete process.env.SHIPHOOK_ROLLBACK_ON_FAILURE;
+    expect(loadConfig(process.env).rollbackOnFailure).toBe(false);
+  });
+
   it("loads from shiphook.yaml when present", async () => {
     await withTempDir(async (dir) => {
       await writeFile(

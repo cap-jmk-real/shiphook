@@ -9,6 +9,8 @@ runScript: npm run deploy
 runTimeoutMs: 1800000
 # secret: your-webhook-secret   # optional; if omitted, CLI auto-generates and persists one
 path: /
+# On deploy script failure: git reset --hard to pre-pull commit and re-run runScript.
+# rollbackOnFailure: false
 
 # Multi-app mode (one Shiphook process / one systemd service):
 # Each app needs its own host + path.

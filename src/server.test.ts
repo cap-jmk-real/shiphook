@@ -4,8 +4,13 @@ import type { ShiphookConfig } from "./config.js";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+
+function gitAddCommit(cwd: string, message: string, ...paths: string[]): void {
+  execFileSync("git", ["add", ...(paths.length > 0 ? paths : ["."])], { cwd });
+  execFileSync("git", ["commit", "-m", message], { cwd });
+}
 
 async function post(
   port: number,
@@ -44,6 +49,7 @@ describe("createShiphookServer", () => {
       runTimeoutMs: 1000,
       path: "/",
       secret: "test-secret",
+      rollbackOnFailure: false,
       apps: [
         {
           name: "default",
@@ -381,4 +387,62 @@ describe("createShiphookServer", () => {
       await server.stop();
     }
   });
+
+  it("includes rollback in JSON when deploy fails and rollbackOnFailure is enabled", async () => {
+    const rollbackDir = await mkdtemp(join(tmpdir(), "shiphook-server-rollback-"));
+    const remote = join(tmpdir(), `shiphook-server-remote-${Date.now()}.git`);
+    try {
+      execSync(`git init --bare "${remote}"`);
+      execSync("git init", { cwd: rollbackDir });
+      execSync("git config user.email 't@t.com'", { cwd: rollbackDir });
+      execSync("git config user.name 'Test'", { cwd: rollbackDir });
+      execSync(`git remote add origin "${remote}"`, { cwd: rollbackDir });
+      await writeFile(join(rollbackDir, "deploy.js"), "console.log('ok');");
+      gitAddCommit(rollbackDir, "good", "deploy.js");
+      execSync("git branch -M main", { cwd: rollbackDir });
+      execSync("git push -u origin main", { cwd: rollbackDir });
+      const goodSha = execSync("git rev-parse HEAD", { cwd: rollbackDir }).toString().trim();
+
+      await writeFile(join(rollbackDir, "deploy.js"), "process.exit(9);");
+      gitAddCommit(rollbackDir, "bad", "deploy.js");
+      execSync("git push origin main", { cwd: rollbackDir });
+      execSync(`git reset --hard ${goodSha}`, { cwd: rollbackDir });
+
+      const server = createShiphookServer({
+        ...config,
+        repoPath: rollbackDir,
+        port: 3151,
+        runScript: "node deploy.js",
+        rollbackOnFailure: true,
+        apps: [
+          {
+            name: "default",
+            host: "",
+            path: "/",
+            repoPath: rollbackDir,
+            runScript: "node deploy.js",
+            secret: "test-secret",
+            runTimeoutMs: 5000,
+          },
+        ],
+      });
+      await server.start();
+      try {
+        const { status, body } = await post(3151, "/?format=json", "test-secret");
+        expect(status).toBe(200);
+        const b = body as {
+          ok: boolean;
+          rollback?: { attempted: boolean; success: boolean };
+        };
+        expect(b.ok).toBe(true);
+        expect(b.rollback?.attempted).toBe(true);
+        expect(b.rollback?.success).toBe(true);
+      } finally {
+        await server.stop();
+      }
+    } finally {
+      await rm(rollbackDir, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

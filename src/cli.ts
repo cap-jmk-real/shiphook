@@ -14,6 +14,7 @@ import {
   type EnsureSecretResult,
 } from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
+import { enqueueDeploy } from "./deploy-queue.js";
 import { parseCleanupTarget, runCleanup } from "./cleanup.js";
 
 type CliCommand = "server" | "deploy" | "setup-https" | "cleanup" | "version";
@@ -191,9 +192,13 @@ async function promptOfferHttpsSetup(): Promise<boolean> {
 
 async function runDeploy() {
   const config = loadConfig();
-  const startedAt = new Date();
-  const result = await pullAndRun(config.repoPath, config.runScript, {
-    timeoutMs: config.runTimeoutMs,
+  let startedAt = new Date();
+  const { result, queuePosition } = await enqueueDeploy(config.repoPath, async () => {
+    startedAt = new Date();
+    return pullAndRun(config.repoPath, config.runScript, {
+      timeoutMs: config.runTimeoutMs,
+      rollbackOnFailure: config.rollbackOnFailure,
+    });
   });
   const finishedAt = new Date();
 
@@ -242,7 +247,7 @@ async function runDeploy() {
   );
   console.log("");
   console.log(colors.bold("Full result (JSON):"));
-  console.log(JSON.stringify({ ...result, log }, null, 2));
+  console.log(JSON.stringify({ ...result, queue: { position: queuePosition }, log }, null, 2));
   if (artEnabled) {
     console.log("");
     console.log(colors.dim("           |\\"));
