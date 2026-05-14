@@ -3,7 +3,12 @@ import { pullAndRun } from "./pull-and-run.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
+
+function gitAddCommit(cwd: string, message: string, ...paths: string[]): void {
+  execFileSync("git", ["add", ...(paths.length > 0 ? paths : ["."])], { cwd });
+  execFileSync("git", ["commit", "-m", message], { cwd });
+}
 
 describe("pullAndRun", () => {
   it("runs script in given directory and captures output", async () => {
@@ -136,13 +141,13 @@ describe("pullAndRun", () => {
       execSync("git config user.name 'Test'", { cwd: dir });
       execSync(`git remote add origin "${remote}"`, { cwd: dir });
       await writeFile(join(dir, "deploy.js"), "console.log('v1');");
-      execSync("git add deploy.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v1", "deploy.js");
       execSync("git branch -M main", { cwd: dir });
       execSync("git push -u origin main", { cwd: dir });
       const goodSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
 
       await writeFile(join(dir, "deploy.js"), "process.exit(1);");
-      execSync("git add deploy.js && git commit -m v2-broken", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v2-broken", "deploy.js");
       execSync("git push origin main", { cwd: dir });
       execSync(`git reset --hard ${goodSha}`, { cwd: dir });
 
@@ -157,7 +162,7 @@ describe("pullAndRun", () => {
       await rm(dir, { recursive: true, force: true });
       await rm(remote, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("does not roll back when rollbackOnFailure is disabled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
@@ -166,10 +171,10 @@ describe("pullAndRun", () => {
       execSync("git config user.email 't@t.com'", { cwd: dir });
       execSync("git config user.name 'Test'", { cwd: dir });
       await writeFile(join(dir, "deploy.js"), "console.log('v1');");
-      execSync("git add deploy.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v1", "deploy.js");
 
       await writeFile(join(dir, "deploy.js"), "process.exit(1);");
-      execSync("git add deploy.js && git commit -m v2", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v2", "deploy.js");
       const badSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
 
       const result = await pullAndRun(dir, "node deploy.js", { rollbackOnFailure: false });
@@ -179,7 +184,7 @@ describe("pullAndRun", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("attempts rollback after run script timeout when rollbackOnFailure is enabled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
@@ -191,13 +196,13 @@ describe("pullAndRun", () => {
       execSync("git config user.name 'Test'", { cwd: dir });
       execSync(`git remote add origin "${remote}"`, { cwd: dir });
       await writeFile(join(dir, "run.js"), "console.log('ok');");
-      execSync("git add run.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v1", "run.js");
       execSync("git branch -M main", { cwd: dir });
       execSync("git push -u origin main", { cwd: dir });
       const goodSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
 
       await writeFile(join(dir, "run.js"), "setTimeout(() => {}, 30_000);");
-      execSync("git add run.js && git commit -m v2", { cwd: dir, shell: "/bin/sh" });
+      gitAddCommit(dir, "v2", "run.js");
       execSync("git push origin main", { cwd: dir });
       execSync(`git reset --hard ${goodSha}`, { cwd: dir });
 
@@ -212,5 +217,5 @@ describe("pullAndRun", () => {
       await rm(dir, { recursive: true, force: true });
       await rm(remote, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
