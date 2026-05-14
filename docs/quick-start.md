@@ -114,5 +114,6 @@ Without the correct secret, Shiphook responds with **401 Unauthorized**.
 
 ## Next steps
 
+- [Deployment recipes](./deployment-recipes) — complete single-app and multi-app server setups (DNS, GitHub Actions, secrets, server commands).
 - [Configuration](./config) — **shiphook.yaml**, env vars, and programmatic API.
 - [Webhook setup](./webhooks) — configure GitHub, GitLab, or any service that can send a POST.

@@ -9,6 +9,7 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/" },
       { text: "Quick start", link: "/quick-start" },
+      { text: "Deployment recipes", link: "/deployment-recipes" },
       { text: "Configuration", link: "/config" },
       { text: "Webhooks", link: "/webhooks" },
       { text: "HTTPS (nginx)", link: "/self-hosted-https" },
@@ -18,6 +19,7 @@ export default defineConfig({
     sidebar: [
       { text: "Introduction", link: "/" },
       { text: "Quick start", link: "/quick-start" },
+      { text: "Deployment recipes", link: "/deployment-recipes" },
       { text: "Configuration", link: "/config" },
       { text: "Webhook setup", link: "/webhooks" },
       { text: "HTTPS (nginx + Certbot)", link: "/self-hosted-https" },

@@ -2,6 +2,23 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
+export interface ShiphookAppConfig {
+  /** Human-readable app identifier for logs and summaries. */
+  name: string;
+  /** Domain name used for routing (lowercased). */
+  host: string;
+  /** HTTP path for this app's webhook route (normalized slash format). */
+  path: string;
+  /** Path to this app's repo to pull and run in. */
+  repoPath: string;
+  /** Command to run after pull for this app. */
+  runScript: string;
+  /** Per-app webhook secret. */
+  secret: string;
+  /** Max time (ms) for this app's deploy command. */
+  runTimeoutMs: number;
+}
+
 export interface ShiphookConfig {
   /** Port for the webhook server (default: 3141) */
   port: number;
@@ -15,6 +32,8 @@ export interface ShiphookConfig {
   secret: string;
   /** HTTP path for the webhook (default: "/") */
   path: string;
+  /** Multi-app mode routes. */
+  apps: ShiphookAppConfig[];
   /** When true, failed deploys reset to pre-pull commit and re-run the deploy script (default: false). */
   rollbackOnFailure: boolean;
 }
@@ -78,6 +97,20 @@ interface YamlConfig {
   path?: string;
   rollbackOnFailure?: boolean;
   rollback_on_failure?: boolean;
+  apps?: YamlAppConfig[];
+}
+
+interface YamlAppConfig {
+  name?: string;
+  host?: string;
+  path?: string;
+  repoPath?: string;
+  repo_path?: string;
+  runScript?: string;
+  run_script?: string;
+  runTimeoutMs?: number;
+  run_timeout_ms?: number;
+  secret?: string;
 }
 
 /**
@@ -108,6 +141,26 @@ function isResolvedPathUnderRepoRoot(repoRoot: string, resolvedFile: string): bo
   const rel = relative(root, file);
   if (rel === "") return true;
   return !rel.startsWith("..");
+}
+
+function normalizePathValue(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return DEFAULT_PATH;
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")) {
+    return withLeadingSlash.slice(0, -1);
+  }
+  return withLeadingSlash;
+}
+
+function normalizeHostValue(host: string): string {
+  const trimmed = host.trim().toLowerCase().replace(/\.$/, "");
+  // strip optional :port suffix so config host matches HTTP Host parsing behavior
+  return trimmed.replace(/:\d+$/, "");
+}
+
+function uniqueRoutingKey(host: string, path: string): string {
+  return `${normalizeHostValue(host)}|${normalizePathValue(path)}`;
 }
 
 /**
@@ -146,7 +199,53 @@ function loadYamlConfig(filePath: string): Partial<ShiphookConfig> {
   const secretVal = data.secret;
   if (nonEmptyString(secretVal)) result.secret = secretVal;
   const pathVal = data.path;
-  if (nonEmptyString(pathVal)) result.path = pathVal;
+  if (nonEmptyString(pathVal)) result.path = normalizePathValue(pathVal);
+  const rawApps = data.apps;
+  if (Array.isArray(rawApps)) {
+    const apps: ShiphookAppConfig[] = [];
+    const seenRoutes = new Set<string>();
+    for (let idx = 0; idx < rawApps.length; idx += 1) {
+      const app = rawApps[idx];
+      if (!app || typeof app !== "object") continue;
+
+      const hostRaw = app.host;
+      const secretRaw = app.secret;
+      if (!nonEmptyString(hostRaw)) {
+        throw new Error(
+          `Invalid apps[${idx}] in shiphook config: each app needs non-empty host`
+        );
+      }
+      const host = normalizeHostValue(hostRaw);
+      if (!host) {
+        throw new Error(`Invalid apps[${idx}] in shiphook config: host must not be empty`);
+      }
+
+      const path = normalizePathValue(nonEmptyString(app.path) ? app.path : DEFAULT_PATH);
+      const routeKey = uniqueRoutingKey(host, path);
+      if (seenRoutes.has(routeKey)) {
+        throw new Error(
+          `Duplicate app route in shiphook config for host "${host}" and path "${path}"`
+        );
+      }
+      seenRoutes.add(routeKey);
+
+      const repoPathVal = app.repoPath ?? app.repo_path;
+      const runScriptVal = app.runScript ?? app.run_script;
+      const timeoutVal = app.runTimeoutMs ?? app.run_timeout_ms;
+      apps.push({
+        name: nonEmptyString(app.name) ? app.name : `${host}${path === "/" ? "" : path}`,
+        host,
+        path,
+        repoPath: nonEmptyString(repoPathVal) ? repoPathVal : ".",
+        runScript: nonEmptyString(runScriptVal) ? runScriptVal : DEFAULT_RUN_SCRIPT,
+        secret: nonEmptyString(secretRaw) ? secretRaw : "",
+        runTimeoutMs: isValidRunTimeoutMs(timeoutVal)
+          ? Math.floor(Number(timeoutVal))
+          : DEFAULT_RUN_TIMEOUT_MS,
+      });
+    }
+    result.apps = apps;
+  }
   const rollbackVal = data.rollbackOnFailure ?? data.rollback_on_failure;
   const rollbackParsed = parseBoolean(rollbackVal);
   if (rollbackParsed !== undefined) result.rollbackOnFailure = rollbackParsed;
@@ -155,13 +254,38 @@ function loadYamlConfig(filePath: string): Partial<ShiphookConfig> {
 
 /** Fills missing config fields with defaults (port, runScript, path, repoPath from cwd). */
 function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookConfig {
+  const normalizedPath = partial.path ? normalizePathValue(partial.path) : DEFAULT_PATH;
+  const normalizedApps =
+    partial.apps?.map((app) => ({
+      ...app,
+      path: normalizePathValue(app.path),
+      host: normalizeHostValue(app.host),
+    })) ?? [];
+
+  // Legacy single-app config becomes a one-entry apps array to keep runtime behavior unified.
+  const apps =
+    normalizedApps.length > 0
+      ? normalizedApps
+      : [
+          {
+            name: "default",
+            host: "",
+            path: normalizedPath,
+            repoPath: partial.repoPath ?? cwd,
+            runScript: partial.runScript ?? DEFAULT_RUN_SCRIPT,
+            runTimeoutMs: partial.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+            secret: partial.secret ?? "",
+          },
+        ];
+
   return {
     port: partial.port ?? DEFAULT_PORT,
     repoPath: partial.repoPath ?? cwd,
     runScript: partial.runScript ?? DEFAULT_RUN_SCRIPT,
     runTimeoutMs: partial.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
     secret: partial.secret ?? "",
-    path: partial.path ?? DEFAULT_PATH,
+    path: normalizedPath,
+    apps,
     rollbackOnFailure: partial.rollbackOnFailure ?? false,
   };
 }
@@ -187,8 +311,17 @@ export function loadConfig(
   if (filePath) {
     try {
       basePartial = loadYamlConfig(filePath);
-    } catch {
-      // Invalid YAML or missing file: ignore, use env only
+    } catch (err) {
+      // Invalid YAML syntax is non-fatal, but explicit config validation errors are fatal.
+      const details = err instanceof Error ? err.message : String(err);
+      if (
+        details.includes("Invalid apps[") ||
+        details.includes("Duplicate app route") ||
+        details.includes("Invalid multi-app config")
+      ) {
+        throw err;
+      }
+      // Invalid YAML or missing file: ignore, use env only.
     }
   }
 
@@ -207,16 +340,44 @@ export function loadConfig(
       ? envTimeout!
       : base.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
 
+  const normalizedPath = nonEmptyString(env.SHIPHOOK_PATH)
+    ? normalizePathValue(env.SHIPHOOK_PATH)
+    : (base.path ?? DEFAULT_PATH);
+  const singleRepoPath = nonEmptyString(env.SHIPHOOK_REPO_PATH)
+    ? env.SHIPHOOK_REPO_PATH
+    : (base.repoPath ?? cwd);
+  const singleRunScript = nonEmptyString(env.SHIPHOOK_RUN_SCRIPT)
+    ? env.SHIPHOOK_RUN_SCRIPT
+    : (base.runScript ?? DEFAULT_RUN_SCRIPT);
+  const singleSecret = nonEmptyString(env.SHIPHOOK_SECRET) ? env.SHIPHOOK_SECRET : base.secret;
+
+  // Env overrides are only for legacy single-app shape; preserve explicit YAML apps as-is.
+  const effectiveApps =
+    base.apps.length > 1 || (base.apps.length === 1 && base.apps[0]?.host)
+      ? base.apps
+      : [
+          {
+            name: base.apps[0]?.name ?? "default",
+            host: base.apps[0]?.host ?? "",
+            path: normalizedPath,
+            repoPath: singleRepoPath,
+            runScript: singleRunScript,
+            runTimeoutMs,
+            secret: singleSecret,
+          },
+        ];
+
   const envRollback = parseBoolean(env.SHIPHOOK_ROLLBACK_ON_FAILURE);
   const rollbackOnFailure = envRollback !== undefined ? envRollback : base.rollbackOnFailure;
 
   return {
     port,
-    repoPath: nonEmptyString(env.SHIPHOOK_REPO_PATH) ? env.SHIPHOOK_REPO_PATH : (base.repoPath ?? cwd),
-    runScript: nonEmptyString(env.SHIPHOOK_RUN_SCRIPT) ? env.SHIPHOOK_RUN_SCRIPT : (base.runScript ?? DEFAULT_RUN_SCRIPT),
+    repoPath: singleRepoPath,
+    runScript: singleRunScript,
     runTimeoutMs,
-    secret: nonEmptyString(env.SHIPHOOK_SECRET) ? env.SHIPHOOK_SECRET : base.secret,
-    path: nonEmptyString(env.SHIPHOOK_PATH) ? env.SHIPHOOK_PATH : (base.path ?? DEFAULT_PATH),
+    secret: singleSecret,
+    path: normalizedPath,
+    apps: effectiveApps,
     rollbackOnFailure,
   };
 }

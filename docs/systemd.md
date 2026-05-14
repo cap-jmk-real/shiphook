@@ -2,11 +2,15 @@
 
 After HTTPS + nginx are set up, you’ll usually want Shiphook to run **in the background**, survive SSH disconnects, and start on boot. On most modern Linux distros (including AlmaLinux), use **systemd**.
 
-The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) **writes** `/etc/systemd/system/shiphook.service`, reloads systemd, and runs **`systemctl enable --now shiphook.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
+The automated **`shiphook setup-https`** script (and interactive **`shiphook`** when you answer **`y`** to HTTPS) creates a per-domain unit at `/etc/systemd/system/shiphook-<domain>.service` (long domains are safely truncated+hashed), reloads systemd, and runs **`systemctl enable --now <unit>.service`** when systemd is available and the CLI passes the install path (normal `sudo` flow).
 
-If **`shiphook.service` is already active**, running `shiphook` again will **restart** the systemd unit (so config changes are applied).
+If the unit already exists, setup-https leaves it unchanged by default so re-running setup does not reinstall the service. To force reinstall/restart from setup, set `SHIPHOOK_REINSTALL_SYSTEMD=1`.
 
-When **systemd starts `shiphook.service`**, the CLI won't try to restart it again (avoids restart loops). Running `shiphook` manually from an interactive terminal can restart the unit so the service comes up with updated config.
+To avoid accidental duplicates, setup-https also checks for an existing unit that already uses the same `WorkingDirectory` (same repo path). If found, it skips creating another unit name for that repo unless you force reinstall.
+
+If a Shiphook unit is already active, running `shiphook` again from an interactive terminal will restart/start the default service workflow.
+
+When systemd starts Shiphook, the CLI won't try to restart it again (avoids restart loops). Running `shiphook` manually from an interactive terminal can restart the unit so the service comes up with updated config.
 
 ---
 
@@ -68,4 +72,37 @@ Shiphook now:
 
 - Use `journalctl -u shiphook.service` to inspect logs (including deploys and secrets setup).
 - You can still run `shiphook deploy` manually to trigger one-off deploys; it doesn’t interfere with the service.
+
+## One service, multiple apps/domains
+
+You can run either one process for many apps (recommended) or one service per app/domain:
+
+- **Single process mode:** one unit with `apps:` config handles many repos/domains.
+- **Per-app mode:** one `shiphook-<domain>.service` per repo/domain, each on its own port.
+
+`shiphook.service` (or a custom unit name) can run a single Shiphook process that serves multiple apps via `apps:` config. This is the recommended way to host multiple repos/domains on one server:
+
+- one `shiphook.service`
+- one Shiphook process
+- multiple app routes (`host` + `path`)
+- one secret per app
+
+Different apps can deploy concurrently; deploys for the same app are serialized.
+
+---
+
+## Cleanup helper (development/troubleshooting)
+
+During webhook/CD setup iterations, stale nginx blocks and old Shiphook unit files are a common source of 404/405/502 surprises. Use:
+
+```bash
+# Remove Shiphook-managed entries for one domain
+# (matching nginx files + matching shiphook*.service units for that domain)
+shiphook cleanup --domain shiphook.example.com
+
+# Remove all Shiphook-managed nginx/systemd entries
+shiphook cleanup --all
+```
+
+The command creates a timestamped nginx backup before changing files.
 

@@ -18,7 +18,7 @@ Shiphook is aimed at **indie projects**, **small SaaS**, and **open source** tea
 
 1. You run the Shiphook HTTP server in (or next to) your app repo.
 2. Your Git host sends a webhook when you push.
-3. Shiphook verifies a shared secret, runs **`git pull`**, reloads **`shiphook.yaml` from the repo when it lives in that tree**, and runs your **`runScript`** (build, restart containers, etc.).
+3. Shiphook routes the request by host/path, verifies the matched app secret, runs **`git pull`**, reloads **`shiphook.yaml` from the repo when it lives in that tree**, and runs your **`runScript`** (build, restart containers, etc.).
 4. Output can stream back in the HTTP response (useful for GitHub Actions logs) or as JSON (`?format=json`).
 
 Configuration is **`shiphook.yaml`** in the repo and/or **environment variables** (env wins on conflicts).
@@ -68,6 +68,7 @@ Same flow as a webhook: `git pull`, then your script.
 |--------|---------|
 | `shiphook` | Start the server (or systemd integration on Linux — see docs). |
 | `shiphook deploy` | Run one deploy in the foreground. |
+| `shiphook cleanup --domain <host> \| --all` | Linux cleanup helper for Shiphook nginx/systemd state (with backup). |
 | `shiphook version` | Print version (`-v` / `--version` also work). |
 | `shiphook setup-https` | Linux helper for nginx + Let’s Encrypt (GitHub needs HTTPS). |
 
@@ -94,6 +95,33 @@ For servers without a TTY, set **`SHIPHOOK_SKIP_HTTPS_PROMPT=1`**.
 
 ---
 
+## Multi-app on one server
+
+Shiphook supports two deployment models on one host:
+
+- **Single process, multi-app (recommended):** one `shiphook` process with one `shiphook.yaml` that uses `apps:` and routes by `host + path`.
+- **Per-app process:** one repo + service per app/domain (often one local port per app).
+
+The first model is usually easier to operate in production. The second model is useful while iterating on individual app pipelines.
+
+---
+
+## Cleanup during pipeline development
+
+While iterating on webhook/CD setup, it is common to accumulate stale nginx/server blocks or old systemd units. Use the built-in cleanup command before re-running setup:
+
+```bash
+# remove configs for one webhook domain (matching nginx files and systemd units)
+shiphook cleanup --domain shiphook.example.com
+
+# or remove all Shiphook-managed nginx/systemd entries
+shiphook cleanup --all
+```
+
+The cleanup command creates a timestamped nginx backup before applying changes.
+
+---
+
 ## Configuration (YAML or environment)
 
 Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or use env vars. **Env overrides the file.**
@@ -105,13 +133,14 @@ Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or 
 | `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command after pull. |
 | `secret` / `SHIPHOOK_SECRET` | (generated) | Required. Omit in YAML and the CLI can create **`.shiphook.secret`**. |
 | `path` / `SHIPHOOK_PATH` | `/` | URL path for the webhook (e.g. `/deploy`). |
-| `rollbackOnFailure` / `SHIPHOOK_ROLLBACK_ON_FAILURE` | `false` | On deploy failure: `git reset --hard` to pre-pull commit and re-run `runScript`. |
 
 After **`git pull`**, Shiphook reloads **repo-local** YAML when the config file lives **inside** the repo. Paths set with **`SHIPHOOK_CONFIG`** to **outside** the repo (e.g. `/etc/...`) are not re-read after pull—use repo-local config if you want each push to pick up YAML changes automatically.
 
-Overlapping webhooks for the same repo are processed in a **FIFO queue** (one deploy at a time per `repoPath`).
+Multi-app mode is supported via `apps:` in `shiphook.yaml` (one process, one systemd service, multiple repos/domains). Each app defines its own `host`, `path`, `repoPath`, and `runScript`; if app `secret` is omitted, Shiphook auto-generates and persists a per-app secret file on first run. Requests for different apps run concurrently, while requests for the same app are serialized.
 
 Full reference: **[Documentation](https://cap-jmk-real.github.io/shiphook/)**
+
+Need step-by-step deployment examples? See **[Deployment recipes](https://cap-jmk-real.github.io/shiphook/deployment-recipes.html)** for single-app and multi-app on one server (DNS, GitHub Actions, secrets, server commands, and YAML).
 
 ---
 

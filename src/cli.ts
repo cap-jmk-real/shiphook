@@ -7,16 +7,26 @@ import * as colors from "kleur/colors";
 import { loadConfig, type ShiphookConfig } from "./config.js";
 import { createShiphookServer } from "./server.js";
 import { pullAndRun } from "./pull-and-run.js";
-import { ensureWebhookSecret, type EnsureSecretResult } from "./secret.js";
+import {
+  ensureWebhookSecret,
+  ensureWebhookSecrets,
+  type EnsureAppSecretsResult,
+  type EnsureSecretResult,
+} from "./secret.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 import { enqueueDeploy } from "./deploy-queue.js";
+import { parseCleanupTarget, runCleanup } from "./cleanup.js";
 
-type CliCommand = "server" | "deploy" | "setup-https" | "version";
+type CliCommand = "server" | "deploy" | "setup-https" | "cleanup" | "version";
+function isMultiAppConfig(config: ShiphookConfig): boolean {
+  return config.apps.length > 1 || (config.apps.length === 1 && config.apps[0]?.host.trim() !== "");
+}
 
 function parseCommand(argv: string[]): CliCommand {
   const cmd = argv[2];
   if (cmd === "deploy") return "deploy";
   if (cmd === "setup-https") return "setup-https";
+  if (cmd === "cleanup") return "cleanup";
   if (cmd === "version" || cmd === "-v" || cmd === "--version") return "version";
   return "server";
 }
@@ -105,6 +115,24 @@ function runSetupHttpsCliCommand(): void {
   process.exitCode = ok ? 0 : 1;
 }
 
+/** `shiphook cleanup --domain <host>` or `shiphook cleanup --all` — remove shiphook systemd + nginx configs safely. */
+function runCleanupCliCommand(argv: string[]): void {
+  if (process.platform !== "linux") {
+    console.error("shiphook cleanup is only supported on Linux hosts.");
+    process.exitCode = 1;
+    return;
+  }
+  const parsed = parseCleanupTarget(argv);
+  if ("error" in parsed) {
+    console.error(`shiphook cleanup: ${parsed.error}`);
+    console.error("Usage: shiphook cleanup --domain <host> | --all");
+    process.exitCode = 1;
+    return;
+  }
+  const ok = runCleanup(parsed);
+  process.exitCode = ok ? 0 : 1;
+}
+
 /** True when running in a typical CI/automation environment (suppress interactive prompts). */
 function isLikelyCiEnvironment(): boolean {
   if (Object.hasOwn(process.env, "CI")) {
@@ -128,6 +156,21 @@ function shouldOfferHttpsPrompt(): boolean {
   if (process.platform !== "linux") return false;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
   return true;
+}
+
+function listRunningShiphookSystemdUnits(): string[] {
+  const r = spawnSync(
+    "systemctl",
+    ["list-units", "--type=service", "--state=running", "--no-legend", "--no-pager"],
+    { encoding: "utf-8" }
+  );
+  if (r.status !== 0) return [];
+  return String(r.stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/)[0] ?? "")
+    .filter((unit) => /^shiphook.*\.service$/.test(unit));
 }
 
 async function promptOfferHttpsSetup(): Promise<boolean> {
@@ -220,10 +263,12 @@ async function runDeploy() {
 /** Prints the same Server + Auth summary as after `server.start()` (and surfaces the webhook secret on a TTY). */
 function printShiphookServerSummary(
   config: ShiphookConfig,
-  meta: EnsureSecretResult,
-  options?: { bootstrapSystemd?: boolean }
+  meta?: EnsureSecretResult,
+  appSecretMeta?: EnsureAppSecretsResult[],
+  options?: { bootstrapSystemd?: boolean; systemdUnits?: string[] }
 ) {
-  const { source, secretFilePath } = meta;
+  const source = meta?.source;
+  const secretFilePath = meta?.secretFilePath;
   const path = config.path === "/" ? "" : config.path;
   const v = getShiphookVersion();
   const versionLabel = v ? ` v${v}` : "";
@@ -241,46 +286,85 @@ function printShiphookServerSummary(
   const repoIsDefaultCwd =
     !process.env.SHIPHOOK_REPO_PATH && String(config.repoPath) === process.cwd();
   const repoLabelExtra = repoIsDefaultCwd ? colors.dim(" (default: current working directory)") : "";
+  const detectedUnits = options?.systemdUnits ?? [];
+  const processHint =
+    detectedUnits.length === 1
+      ? detectedUnits[0]
+      : detectedUnits.length > 1
+        ? `${detectedUnits[0]} (+${detectedUnits.length - 1} more)`
+        : "no systemd unit detected";
   const listenHint = options?.bootstrapSystemd
-    ? `http://127.0.0.1:${config.port}${path} (behind nginx HTTPS; process: shiphook.service)`
+    ? `http://127.0.0.1:${config.port}${path} (behind nginx HTTPS; process: ${processHint})`
     : `http://localhost:${config.port}${path}`;
   console.log(
     `${colors.bold("  URL: ")}  ${colors.white(listenHint)}\n` +
       `${colors.bold("  Repo:")}  ${colors.white(String(config.repoPath))}${repoLabelExtra}\n` +
       `${colors.bold("  Run: ")}  ${colors.white(String(config.runScript))}\n`
   );
+  const multiMode = isMultiAppConfig(config);
+  if (multiMode) {
+    console.log(`${colors.bold("  Apps:")}  ${colors.white(String(config.apps.length))}`);
+    for (const app of config.apps) {
+      const host = app.host || "(any-host)";
+      console.log(
+        `${colors.bold("    -")} ${colors.white(app.name)} ${colors.dim(
+          `(${host}${app.path === "/" ? "" : app.path})`
+        )}`
+      );
+    }
+    console.log("");
+  }
   console.log(colors.bold("Auth"));
   console.log(`  Mode:   ${colors.white("required")}`);
-  console.log(`  Source: ${colors.white(String(source))}`);
-  if (source === "generated") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
-  } else if (source === "file") {
-    console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+  if (multiMode) {
+    console.log(`  Source: ${colors.white("per-app config secrets")}`);
+    const generatedCount = (appSecretMeta ?? []).filter((m) => m.source === "generated").length;
+    const fileLoadedCount = (appSecretMeta ?? []).filter((m) => m.source === "file").length;
+    if (generatedCount > 0 || fileLoadedCount > 0) {
+      console.log(
+        `  App secrets: ${colors.white(
+          `${generatedCount} generated, ${fileLoadedCount} loaded from files`
+        )}`
+      );
+    } else {
+      console.log(`  App secrets: ${colors.white("from config")}`);
+    }
+  } else if (source && secretFilePath) {
+    console.log(`  Source: ${colors.white(String(source))}`);
+    if (source === "generated") {
+      console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+    } else if (source === "file") {
+      console.log(`  Secret file: ${colors.white(String(secretFilePath))}`);
+    } else {
+      console.log(`  Loaded from: ${colors.white(String(source))}`);
+      console.log(
+        `  Secret file: ${colors.white(
+          `${String(secretFilePath)} (not persisted by Shiphook for ${source})`
+        )}`
+      );
+    }
   } else {
-    console.log(`  Loaded from: ${colors.white(String(source))}`);
-    console.log(
-      `  Secret file: ${colors.white(
-        `${String(secretFilePath)} (not persisted by Shiphook for ${source})`
-      )}`
-    );
+    console.log(`  Source: ${colors.white("unknown")}`);
   }
 
-  const secretTrim = String(config.secret ?? "").trim();
-  if (process.stdout.isTTY && secretTrim.length > 0) {
-    console.log("");
-    console.log(
-      colors.bold(
-        colors.green("GitHub webhook “Secret” value (copy for your repo’s webhook settings):")
-      )
-    );
-    console.log(`  ${colors.white(secretTrim)}`);
-    console.log("");
-  } else if (secretTrim.length > 0) {
-    console.log(
-      `  Secret value: ${colors.dim(
-        "(omitted on non-TTY; read .shiphook.secret, shiphook.yaml, or SHIPHOOK_SECRET)"
-      )}`
-    );
+  if (!multiMode) {
+    const secretTrim = String(config.secret ?? "").trim();
+    if (process.stdout.isTTY && secretTrim.length > 0) {
+      console.log("");
+      console.log(
+        colors.bold(
+          colors.green("GitHub webhook “Secret” value (copy for your repo’s webhook settings):")
+        )
+      );
+      console.log(`  ${colors.white(secretTrim)}`);
+      console.log("");
+    } else if (secretTrim.length > 0) {
+      console.log(
+        `  Secret value: ${colors.dim(
+          "(omitted on non-TTY; read .shiphook.secret, shiphook.yaml, or SHIPHOOK_SECRET)"
+        )}`
+      );
+    }
   }
 }
 
@@ -296,6 +380,10 @@ async function main() {
   }
   if (command === "setup-https") {
     runSetupHttpsCliCommand();
+    return;
+  }
+  if (command === "cleanup") {
+    runCleanupCliCommand(process.argv);
     return;
   }
   if (command === "deploy") {
@@ -389,13 +477,34 @@ async function main() {
     }
   }
 
-  const secretMeta = await ensureWebhookSecret(config);
+  const multiMode = isMultiAppConfig(config);
+  let secretMeta: EnsureSecretResult | undefined;
+  let appSecretMeta: EnsureAppSecretsResult[] | undefined;
+  if (multiMode) {
+    appSecretMeta = await ensureWebhookSecrets(config);
+  } else {
+    secretMeta = await ensureWebhookSecret(config);
+  }
 
   if (exitingAfterHttpsBootstrap) {
-    printShiphookServerSummary(config, secretMeta, { bootstrapSystemd: true });
-    console.log(colors.bold(colors.green("Done. Shiphook is running in the background via systemd.")));
-    console.log("  Check status:  sudo systemctl status shiphook.service");
-    console.log("  Follow logs:   sudo journalctl -u shiphook.service -f");
+    const runningUnits = listRunningShiphookSystemdUnits();
+    // Do not print Server URL summary from the pre-bootstrap config snapshot:
+    // setup-https may have just changed path/port via systemd env, and showing the old
+    // in-memory values is confusing. The setup script already prints authoritative URL/Proxy.
+    console.log(
+      colors.bold(colors.green("Done. HTTPS bootstrap completed and Shiphook is running via systemd."))
+    );
+    if (runningUnits.length > 0) {
+      const unit = runningUnits[0];
+      console.log(`  Check status:  sudo systemctl status ${unit}`);
+      console.log(`  Follow logs:   sudo journalctl -u ${unit} -f`);
+      if (runningUnits.length > 1) {
+        console.log(`  Other units:   ${runningUnits.slice(1).join(", ")}`);
+      }
+    } else {
+      console.log("  Check status:  sudo systemctl list-units | grep -E '^shiphook.*\\.service'");
+      console.log("  Follow logs:   sudo journalctl -u '<shiphook-unit>' -f");
+    }
     console.log("");
     process.exit(0);
   }
@@ -409,7 +518,7 @@ async function main() {
     reloadConfigCwd: process.cwd(),
   });
   await server.start();
-  printShiphookServerSummary(config, secretMeta);
+  printShiphookServerSummary(config, secretMeta, appSecretMeta);
 }
 
 main();
