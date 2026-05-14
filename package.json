@@ -1,6 +1,6 @@
 {
   "name": "shiphook",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "When Git notifies your server, Shiphook pulls the latest code and runs your deploy script. You run it on your own machine (no third-party deploy service). Settings go in shiphook.yaml or environment variables. Needs Node 22 or newer. Linux can use the built-in helper for nginx and HTTPS.",
   "repository": {
     "type": "git",
