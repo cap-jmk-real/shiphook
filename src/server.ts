@@ -162,20 +162,29 @@ export function createShiphookServer(
       return;
     }
 
+    const requestUrl = new URL(req.url ?? "", "http://localhost");
+    const wantsJson = requestUrl.searchParams.get("format") === "json";
     let queuePosition = 1;
+    let responseStarted = false;
+
+    const startResponseIfNeeded = (position: number) => {
+      if (responseStarted) return;
+      responseStarted = true;
+      if (wantsJson) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+      } else {
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        if (position > 1) {
+          res.write(`[queued] waiting; position=${position}\n`);
+        }
+      }
+    };
+
     const { result: _deployResult } = await enqueueDeploy(
       deployLockKey(matchedApp),
       async () => {
-        const requestUrl = new URL(req.url ?? "", "http://localhost");
-        const wantsJson = requestUrl.searchParams.get("format") === "json";
-
-        if (wantsJson) {
-          res.writeHead(200, { "Content-Type": "application/json" });
-        } else {
-          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-          if (queuePosition > 1) {
-            res.write(`[queued] waiting; position=${queuePosition}\n`);
-          }
+        startResponseIfNeeded(queuePosition);
+        if (!wantsJson) {
           res.write(`[start] shiphook deploy\n`);
         }
 
@@ -298,6 +307,7 @@ export function createShiphookServer(
       {
         onQueued: (position) => {
           queuePosition = position;
+          startResponseIfNeeded(position);
         },
       }
     );
