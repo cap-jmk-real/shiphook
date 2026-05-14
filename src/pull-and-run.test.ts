@@ -125,4 +125,92 @@ describe("pullAndRun", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rolls back to pre-pull commit and redeploys when rollbackOnFailure is enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    const remote = join(tmpdir(), `shiphook-remote-${Date.now()}.git`);
+    try {
+      execSync(`git init --bare "${remote}"`);
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      execSync(`git remote add origin "${remote}"`, { cwd: dir });
+      await writeFile(join(dir, "deploy.js"), "console.log('v1');");
+      execSync("git add deploy.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+      execSync("git branch -M main", { cwd: dir });
+      execSync("git push -u origin main", { cwd: dir });
+      const goodSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
+
+      await writeFile(join(dir, "deploy.js"), "process.exit(1);");
+      execSync("git add deploy.js && git commit -m v2-broken", { cwd: dir, shell: "/bin/sh" });
+      execSync("git push origin main", { cwd: dir });
+      execSync(`git reset --hard ${goodSha}`, { cwd: dir });
+
+      const result = await pullAndRun(dir, "node deploy.js", { rollbackOnFailure: true });
+      expect(result.success).toBe(true);
+      expect(result.rollback?.attempted).toBe(true);
+      expect(result.rollback?.success).toBe(true);
+      expect(result.rollback?.prePullSha).toBe(goodSha);
+      expect(result.rollback?.stdout).toContain("v1");
+      expect(execSync("git rev-parse HEAD", { cwd: dir }).toString().trim()).toBe(goodSha);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("does not roll back when rollbackOnFailure is disabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    try {
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      await writeFile(join(dir, "deploy.js"), "console.log('v1');");
+      execSync("git add deploy.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+
+      await writeFile(join(dir, "deploy.js"), "process.exit(1);");
+      execSync("git add deploy.js && git commit -m v2", { cwd: dir, shell: "/bin/sh" });
+      const badSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
+
+      const result = await pullAndRun(dir, "node deploy.js", { rollbackOnFailure: false });
+      expect(result.success).toBe(false);
+      expect(result.rollback).toBeUndefined();
+      expect(execSync("git rev-parse HEAD", { cwd: dir }).toString().trim()).toBe(badSha);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("attempts rollback after run script timeout when rollbackOnFailure is enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shiphook-test-"));
+    const remote = join(tmpdir(), `shiphook-remote-timeout-${Date.now()}.git`);
+    try {
+      execSync(`git init --bare "${remote}"`);
+      execSync("git init", { cwd: dir });
+      execSync("git config user.email 't@t.com'", { cwd: dir });
+      execSync("git config user.name 'Test'", { cwd: dir });
+      execSync(`git remote add origin "${remote}"`, { cwd: dir });
+      await writeFile(join(dir, "run.js"), "console.log('ok');");
+      execSync("git add run.js && git commit -m v1", { cwd: dir, shell: "/bin/sh" });
+      execSync("git branch -M main", { cwd: dir });
+      execSync("git push -u origin main", { cwd: dir });
+      const goodSha = execSync("git rev-parse HEAD", { cwd: dir }).toString().trim();
+
+      await writeFile(join(dir, "run.js"), "setTimeout(() => {}, 30_000);");
+      execSync("git add run.js && git commit -m v2", { cwd: dir, shell: "/bin/sh" });
+      execSync("git push origin main", { cwd: dir });
+      execSync(`git reset --hard ${goodSha}`, { cwd: dir });
+
+      const result = await pullAndRun(dir, "node run.js", {
+        rollbackOnFailure: true,
+        timeoutMs: 100,
+      });
+      expect(result.rollback?.attempted).toBe(true);
+      expect(result.rollback?.prePullSha).toBe(goodSha);
+      expect(execSync("git rev-parse HEAD", { cwd: dir }).toString().trim()).toBe(goodSha);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
 });

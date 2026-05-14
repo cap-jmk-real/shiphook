@@ -105,8 +105,11 @@ Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or 
 | `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command after pull. |
 | `secret` / `SHIPHOOK_SECRET` | (generated) | Required. Omit in YAML and the CLI can create **`.shiphook.secret`**. |
 | `path` / `SHIPHOOK_PATH` | `/` | URL path for the webhook (e.g. `/deploy`). |
+| `rollbackOnFailure` / `SHIPHOOK_ROLLBACK_ON_FAILURE` | `false` | On deploy failure: `git reset --hard` to pre-pull commit and re-run `runScript`. |
 
 After **`git pull`**, Shiphook reloads **repo-local** YAML when the config file lives **inside** the repo. Paths set with **`SHIPHOOK_CONFIG`** to **outside** the repo (e.g. `/etc/...`) are not re-read after pull—use repo-local config if you want each push to pick up YAML changes automatically.
+
+Overlapping webhooks for the same repo are processed in a **FIFO queue** (one deploy at a time per `repoPath`).
 
 Full reference: **[Documentation](https://cap-jmk-real.github.io/shiphook/)**
 

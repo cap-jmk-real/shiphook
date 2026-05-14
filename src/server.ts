@@ -1,8 +1,9 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig, type ShiphookConfig } from "./config.js";
 import { ensureWebhookSecret } from "./secret.js";
-import { pullAndRun } from "./pull-and-run.js";
+import { pullAndRun, type DeployOutputPhase } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
+import { enqueueDeploy } from "./deploy-queue.js";
 
 /**
  * Creates an HTTP server that accepts POST on config.path, validates webhook secret,
@@ -96,32 +97,28 @@ export function createShiphookServer(
     const requestUrl = new URL(req.url ?? "", "http://localhost");
     const wantsJson = requestUrl.searchParams.get("format") === "json";
 
-    // Default: stream deploy output as plain text so GitHub Actions can show it live.
     if (wantsJson) {
       res.writeHead(200, { "Content-Type": "application/json" });
     } else {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.write(`[start] shiphook deploy\n`);
     }
 
-    const startedAt = new Date();
+    let queuePosition = 1;
+    let startedAt = new Date();
 
     const outputWriter = (() => {
-      // Keep partial lines per (phase, stream) so we can prefix each emitted line.
       const partialByKey = new Map<string, string>();
       const prefixForKey = (key: string) => {
-        // key format: `${phase}:${stream}`
         const [phase, stream] = key.split(":");
         return `[${phase}] ${stream}: `;
       };
 
-      const writeChunk = (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
+      const writeChunk = (phase: DeployOutputPhase, stream: "stdout" | "stderr", data: string) => {
         const key = `${phase}:${stream}`;
         const prev = partialByKey.get(key) ?? "";
         const next = prev + data;
         const parts = next.split("\n");
 
-        // If chunk ended with newline, last part is "" and should flush.
         const completeParts = parts.slice(0, -1);
         const lastPart = parts[parts.length - 1] ?? "";
 
@@ -142,16 +139,36 @@ export function createShiphookServer(
       return { writeChunk, flush };
     })();
 
-    const onOutput = !wantsJson
-      ? (phase: "pull" | "run", stream: "stdout" | "stderr", data: string) => {
-          outputWriter.writeChunk(phase, stream, data);
+    const { result, queuePosition: finalQueuePosition } = await enqueueDeploy(
+      effectiveConfig.repoPath,
+      async () => {
+        startedAt = new Date();
+        if (!wantsJson) {
+          if (queuePosition > 1) {
+            res.write(`[queued] waiting; position=${queuePosition}\n`);
+          }
+          res.write(`[start] shiphook deploy\n`);
         }
-      : undefined;
 
-    const result = await pullAndRun(effectiveConfig.repoPath, effectiveConfig.runScript, {
-      timeoutMs: effectiveConfig.runTimeoutMs,
-      onOutput,
-    });
+        const onOutput = !wantsJson
+          ? (phase: DeployOutputPhase, stream: "stdout" | "stderr", data: string) => {
+              outputWriter.writeChunk(phase, stream, data);
+            }
+          : undefined;
+
+        return pullAndRun(effectiveConfig.repoPath, effectiveConfig.runScript, {
+          timeoutMs: effectiveConfig.runTimeoutMs,
+          onOutput,
+          rollbackOnFailure: effectiveConfig.rollbackOnFailure,
+        });
+      },
+      {
+        onQueued: (position) => {
+          queuePosition = position;
+        },
+      }
+    );
+
     const finishedAt = new Date();
 
     let logInfo:
@@ -179,8 +196,6 @@ export function createShiphookServer(
         log: files.textPathRelativeToRepo,
       };
     } catch (err) {
-      // Logging failure should never prevent the deployment response.
-      // The server will still return the pull/run output.
       const details = err instanceof Error ? err.message : String(err);
       console.error(`shiphook: failed to write deploy logs: ${details}`);
       logInfo = { error: "failed to write deploy logs", details };
@@ -192,12 +207,14 @@ export function createShiphookServer(
     if (wantsJson) {
       const body = {
         ok: result.success,
+        queue: { position: finalQueuePosition },
         pull: { success: result.pullSuccess, stdout: result.pullStdout, stderr: result.pullStderr },
         run: {
           stdout: result.runStdout,
           stderr: result.runStderr,
           exitCode: result.runExitCode,
         },
+        rollback: result.rollback ?? null,
         error: result.error,
         log: logInfo,
       };
@@ -208,7 +225,12 @@ export function createShiphookServer(
     outputWriter.flush();
 
     const exitCodeString = result.runExitCode === null ? "null" : String(result.runExitCode);
-    res.write(`[done] ok=${result.success} exitCode=${exitCodeString}\n`);
+    const rollbackNote = result.rollback?.attempted
+      ? ` rollback=${result.rollback.success ? "ok" : "failed"}`
+      : "";
+    res.write(
+      `[done] ok=${result.success} exitCode=${exitCodeString} queuePosition=${finalQueuePosition}${rollbackNote}\n`
+    );
     res.end();
   });
 

@@ -40,9 +40,10 @@ describe("createShiphookServer", () => {
       port: 0,
       repoPath: testDir,
       runScript: "node deploy.js",
-        runTimeoutMs: 1000,
+      runTimeoutMs: 1000,
       path: "/",
       secret: "test-secret",
+      rollbackOnFailure: false,
     };
   });
 
@@ -175,6 +176,7 @@ describe("createShiphookServer", () => {
         runTimeoutMs: 1000,
         path: "/",
         secret: "yaml-secret-1",
+        rollbackOnFailure: false,
       },
       { reloadConfigEachRequest: true, reloadConfigCwd: testDir }
     );
@@ -202,6 +204,119 @@ describe("createShiphookServer", () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+    }
+  });
+
+  it("runs concurrent POSTs in FIFO order on the same repo", async () => {
+    const seqPath = join(testDir, "seq.log");
+    await rm(seqPath, { force: true });
+    await rm(join(testDir, "shiphook.yaml"), { force: true });
+    await writeFile(
+      join(testDir, "seq.js"),
+      `const fs=require('fs');
+const p=${JSON.stringify(seqPath)};
+const n=fs.existsSync(p)?parseInt(fs.readFileSync(p,'utf8'),10)+1:1;
+fs.writeFileSync(p,String(n));
+console.log('seq='+n);`
+    );
+
+    const server = createShiphookServer({ ...config, port: 3148, runScript: "node seq.js" });
+    await server.start();
+    try {
+      const [res1, res2] = await Promise.all([
+        post(3148, "/?format=json", "test-secret"),
+        post(3148, "/?format=json", "test-secret"),
+      ]);
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+      const b1 = res1.body as { run?: { stdout?: string }; queue?: { position?: number } };
+      const b2 = res2.body as { run?: { stdout?: string }; queue?: { position?: number } };
+      expect(b1.queue?.position).toBe(1);
+      expect(b2.queue?.position).toBe(2);
+      expect(b1.run?.stdout).toContain("seq=1");
+      expect(b2.run?.stdout).toContain("seq=2");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("streams queue position while waiting in text mode", async () => {
+    await rm(join(testDir, "shiphook.yaml"), { force: true });
+    await writeFile(
+      join(testDir, "slow.js"),
+      "setTimeout(() => { console.log('done'); }, 400);"
+    );
+
+    const server = createShiphookServer({
+      ...config,
+      port: 3150,
+      runScript: "node slow.js",
+      runTimeoutMs: 5000,
+    });
+    await server.start();
+    try {
+      const [res1, res2] = await Promise.all([
+        post(3150, "/", "test-secret", undefined, { asText: true }),
+        post(3150, "/", "test-secret", undefined, { asText: true }),
+      ]);
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+      const text1 = res1.body as string;
+      const text2 = res2.body as string;
+      expect(text1).toContain("[start] shiphook deploy");
+      expect(text1).not.toContain("[queued]");
+      expect(text2).toContain("[queued] waiting; position=2");
+      expect(text2).toContain("[start] shiphook deploy");
+      expect(text2).toMatch(/\[done\]\s+ok=true\s+exitCode=0\s+queuePosition=2/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("includes rollback in JSON when deploy fails and rollbackOnFailure is enabled", async () => {
+    const rollbackDir = await mkdtemp(join(tmpdir(), "shiphook-server-rollback-"));
+    const remote = join(tmpdir(), `shiphook-server-remote-${Date.now()}.git`);
+    try {
+      execSync(`git init --bare "${remote}"`);
+      execSync("git init", { cwd: rollbackDir });
+      execSync("git config user.email 't@t.com'", { cwd: rollbackDir });
+      execSync("git config user.name 'Test'", { cwd: rollbackDir });
+      execSync(`git remote add origin "${remote}"`, { cwd: rollbackDir });
+      await writeFile(join(rollbackDir, "deploy.js"), "console.log('ok');");
+      execSync("git add deploy.js && git commit -m good", { cwd: rollbackDir, shell: "/bin/sh" });
+      execSync("git branch -M main", { cwd: rollbackDir });
+      execSync("git push -u origin main", { cwd: rollbackDir });
+      const goodSha = execSync("git rev-parse HEAD", { cwd: rollbackDir }).toString().trim();
+
+      await writeFile(join(rollbackDir, "deploy.js"), "process.exit(9);");
+      execSync("git add deploy.js && git commit -m bad", { cwd: rollbackDir, shell: "/bin/sh" });
+      execSync("git push origin main", { cwd: rollbackDir });
+      execSync(`git reset --hard ${goodSha}`, { cwd: rollbackDir });
+
+      const server = createShiphookServer({
+        ...config,
+        repoPath: rollbackDir,
+        port: 3149,
+        runScript: "node deploy.js",
+        rollbackOnFailure: true,
+      });
+      await server.start();
+      try {
+        const { status, body } = await post(3149, "/?format=json", "test-secret");
+        expect(status).toBe(200);
+        const b = body as {
+          ok: boolean;
+          rollback?: { attempted: boolean; success: boolean };
+        };
+        expect(b.ok).toBe(true);
+        expect(b.rollback?.attempted).toBe(true);
+        expect(b.rollback?.success).toBe(true);
+      } finally {
+        await server.stop();
+      }
+    } finally {
+      await rm(rollbackDir, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
     }
   });
 });

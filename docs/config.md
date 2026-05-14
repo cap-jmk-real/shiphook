@@ -15,6 +15,7 @@ port: 3141
 repoPath: .                    # or absolute path, e.g. /var/www/my-app
 runScript: npm run deploy
 runTimeoutMs: 1800000         # max time for the deploy command (default: 30 minutes)
+rollbackOnFailure: false      # on run failure: reset to pre-pull commit and re-run runScript
 path: /
 # secret: your-webhook-secret  # optional; if omitted, CLI auto-generates and persists one
 ```
@@ -39,10 +40,32 @@ Env vars take precedence over the YAML file. Use them for secrets or overrides w
 | `SHIPHOOK_RUN_TIMEOUT_MS` | `1800000` | Max time (ms) to allow the run script to finish before timing out. |
 | `SHIPHOOK_SECRET` | (auto) | Secret is always required for matching POSTs. If omitted, the CLI auto-generates and persists it to `.shiphook.secret`. |
 | `SHIPHOOK_PATH` | `/` | URL path that accepts the webhook (e.g. `/deploy`). |
+| `SHIPHOOK_ROLLBACK_ON_FAILURE` | `false` | When `true`, a failed deploy resets the repo to the pre-pull commit and re-runs `runScript`. |
 | `SHIPHOOK_CONFIG` | (auto-detect) | Path to config file (e.g. `./shiphook.yaml`). |
 | `SHIPHOOK_SKIP_HTTPS_PROMPT` | (unset) | Set to `1` to skip the interactive “set up HTTPS?” question when starting `shiphook` on Linux (useful for systemd/CI). |
 
 After **`git pull`** on a webhook (or `shiphook deploy`), Shiphook reloads config **from the repo tree** when a YAML file exists **under** `SHIPHOOK_REPO_PATH` (auto-detected names, or `SHIPHOOK_CONFIG` as a path **inside** that directory). It then runs **`runScript`** / **`runTimeoutMs`** from that merged view (env vars above still override), so the same push can change the deploy command for that run. If `SHIPHOOK_CONFIG` points **outside** the repo (e.g. an absolute file under `/etc`), post-pull reload is skipped for that path—`git pull` does not update those files—so the run uses the script/timeout from the server’s already-loaded config. If there is no repo-local config file, the run also keeps the request-time or startup script/timeout.
+
+---
+
+## Rollback on failure
+
+When **`rollbackOnFailure`** is `true` (or `SHIPHOOK_ROLLBACK_ON_FAILURE=true`), Shiphook records the current `HEAD` before `git pull`. If the deploy script exits non-zero or times out, it runs:
+
+1. `git reset --hard <pre-pull-sha>`
+2. The effective **`runScript`** again at that commit (to restart containers/processes)
+
+The overall deploy is marked successful only if the rollback redeploy succeeds. Rollback details appear in deploy logs and in `?format=json` responses under `rollback`.
+
+This is opt-in (default `false`) so existing setups are unchanged.
+
+---
+
+## Deploy queue
+
+Webhook POSTs and `shiphook deploy` for the same **`repoPath`** are serialized in a **FIFO queue**: one `git pull` + deploy (including rollback when enabled) runs at a time. Additional requests wait on the same HTTP connection and stream `[queued] waiting; position=N` before their deploy starts.
+
+Later queue entries run `git pull` when their turn arrives, so commits pushed while an earlier deploy is running are still picked up.
 
 ---
 
@@ -114,8 +137,10 @@ const config = {
   port: 3141,
   repoPath: "/app",
   runScript: "npm run deploy",
+  runTimeoutMs: 30 * 60 * 1000,
   secret: process.env.SHIPHOOK_SECRET ?? "",
   path: "/",
+  rollbackOnFailure: false,
 };
 
 await ensureWebhookSecret(config);

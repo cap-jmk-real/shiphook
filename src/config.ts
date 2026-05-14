@@ -15,6 +15,8 @@ export interface ShiphookConfig {
   secret: string;
   /** HTTP path for the webhook (default: "/") */
   path: string;
+  /** When true, failed deploys reset to pre-pull commit and re-run the deploy script (default: false). */
+  rollbackOnFailure: boolean;
 }
 
 const DEFAULT_PORT = 3141;
@@ -35,6 +37,22 @@ function isValidPort(value: unknown): value is number {
 /** Type guard: true if value is a non-empty string. */
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+/** Parses YAML/env booleans (true/false, 1/0, yes/no). */
+function parseBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+    if (v === "false" || v === "0" || v === "no" || v === "off") return false;
+  }
+  return undefined;
 }
 
 /** Returns true if value is a finite integer in the valid timeout range. */
@@ -58,6 +76,8 @@ interface YamlConfig {
   run_timeout_ms?: number;
   secret?: string;
   path?: string;
+  rollbackOnFailure?: boolean;
+  rollback_on_failure?: boolean;
 }
 
 /**
@@ -127,6 +147,9 @@ function loadYamlConfig(filePath: string): Partial<ShiphookConfig> {
   if (nonEmptyString(secretVal)) result.secret = secretVal;
   const pathVal = data.path;
   if (nonEmptyString(pathVal)) result.path = pathVal;
+  const rollbackVal = data.rollbackOnFailure ?? data.rollback_on_failure;
+  const rollbackParsed = parseBoolean(rollbackVal);
+  if (rollbackParsed !== undefined) result.rollbackOnFailure = rollbackParsed;
   return result;
 }
 
@@ -139,6 +162,7 @@ function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookC
     runTimeoutMs: partial.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
     secret: partial.secret ?? "",
     path: partial.path ?? DEFAULT_PATH,
+    rollbackOnFailure: partial.rollbackOnFailure ?? false,
   };
 }
 
@@ -183,6 +207,9 @@ export function loadConfig(
       ? envTimeout!
       : base.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
 
+  const envRollback = parseBoolean(env.SHIPHOOK_ROLLBACK_ON_FAILURE);
+  const rollbackOnFailure = envRollback !== undefined ? envRollback : base.rollbackOnFailure;
+
   return {
     port,
     repoPath: nonEmptyString(env.SHIPHOOK_REPO_PATH) ? env.SHIPHOOK_REPO_PATH : (base.repoPath ?? cwd),
@@ -190,5 +217,6 @@ export function loadConfig(
     runTimeoutMs,
     secret: nonEmptyString(env.SHIPHOOK_SECRET) ? env.SHIPHOOK_SECRET : base.secret,
     path: nonEmptyString(env.SHIPHOOK_PATH) ? env.SHIPHOOK_PATH : (base.path ?? DEFAULT_PATH),
+    rollbackOnFailure,
   };
 }
