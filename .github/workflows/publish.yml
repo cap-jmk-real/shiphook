@@ -27,6 +27,7 @@ jobs:
           node-version: "22"
           cache: "npm"
           registry-url: "https://registry.npmjs.org/"
+          always-auth: false
 
       - name: Install
         run: npm ci
@@ -35,7 +36,7 @@ jobs:
         run: npm run build
 
       - name: Publish
-        run: npm publish --access public --registry https://registry.npmjs.org/
+        run: npm publish --access public --provenance --registry https://registry.npmjs.org/
 
       - name: Read package version
         id: pkg
