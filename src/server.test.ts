@@ -50,6 +50,7 @@ describe("createShiphookServer", () => {
       path: "/",
       secret: "test-secret",
       rollbackOnFailure: false,
+      eventsToken: "events-secret",
       apps: [
         {
           name: "default",
@@ -74,6 +75,22 @@ describe("createShiphookServer", () => {
     try {
       const res = await fetch("http://127.0.0.1:3142/");
       expect(res.status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("serves an authenticated, bounded deployment events feed", async () => {
+    const server = createShiphookServer({ ...config, port: 3160 });
+    await server.start();
+    try {
+      const denied = await fetch("http://127.0.0.1:3160/events");
+      expect(denied.status).toBe(401);
+      const allowed = await fetch("http://127.0.0.1:3160/events?limit=0", {
+        headers: { Authorization: "Bearer events-secret" },
+      });
+      expect(allowed.status).toBe(200);
+      expect(await allowed.json()).toEqual({ events: [] });
     } finally {
       await server.stop();
     }

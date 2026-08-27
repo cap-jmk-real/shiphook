@@ -36,6 +36,8 @@ export interface ShiphookConfig {
   apps: ShiphookAppConfig[];
   /** When true, failed deploys reset to pre-pull commit and re-run the deploy script (default: false). */
   rollbackOnFailure: boolean;
+  /** Dedicated read-only token for deployment events. */
+  eventsToken: string;
 }
 
 const DEFAULT_PORT = 3141;
@@ -97,6 +99,8 @@ interface YamlConfig {
   path?: string;
   rollbackOnFailure?: boolean;
   rollback_on_failure?: boolean;
+  eventsToken?: string;
+  events_token?: string;
   apps?: YamlAppConfig[];
 }
 
@@ -246,6 +250,8 @@ function loadYamlConfig(filePath: string): Partial<ShiphookConfig> {
     }
     result.apps = apps;
   }
+  const eventsTokenVal = data.eventsToken ?? data.events_token;
+  if (nonEmptyString(eventsTokenVal)) result.eventsToken = eventsTokenVal;
   const rollbackVal = data.rollbackOnFailure ?? data.rollback_on_failure;
   const rollbackParsed = parseBoolean(rollbackVal);
   if (rollbackParsed !== undefined) result.rollbackOnFailure = rollbackParsed;
@@ -287,6 +293,7 @@ function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookC
     path: normalizedPath,
     apps,
     rollbackOnFailure: partial.rollbackOnFailure ?? false,
+    eventsToken: partial.eventsToken ?? "",
   };
 }
 
@@ -296,7 +303,7 @@ function applyDefaults(partial: Partial<ShiphookConfig>, cwd: string): ShiphookC
  * Invalid or empty env values are ignored and fall back to file or defaults.
  *
  * @param env - Environment object (default: process.env). Keys: SHIPHOOK_PORT, SHIPHOOK_REPO_PATH,
- *   SHIPHOOK_RUN_SCRIPT, SHIPHOOK_SECRET, SHIPHOOK_PATH, SHIPHOOK_CONFIG.
+ *   SHIPHOOK_RUN_SCRIPT, SHIPHOOK_SECRET, SHIPHOOK_EVENTS_TOKEN, SHIPHOOK_PATH, SHIPHOOK_CONFIG.
  * @param options.cwd - Directory to search for config file; defaults to process.cwd().
  * @returns Resolved ShiphookConfig with defaults applied.
  */
@@ -350,6 +357,9 @@ export function loadConfig(
     ? env.SHIPHOOK_RUN_SCRIPT
     : (base.runScript ?? DEFAULT_RUN_SCRIPT);
   const singleSecret = nonEmptyString(env.SHIPHOOK_SECRET) ? env.SHIPHOOK_SECRET : base.secret;
+  const eventsToken = nonEmptyString(env.SHIPHOOK_EVENTS_TOKEN)
+    ? env.SHIPHOOK_EVENTS_TOKEN
+    : (base.eventsToken ?? "");
 
   // Env overrides are only for legacy single-app shape; preserve explicit YAML apps as-is.
   const effectiveApps =
@@ -379,5 +389,6 @@ export function loadConfig(
     path: normalizedPath,
     apps: effectiveApps,
     rollbackOnFailure,
+    eventsToken,
   };
 }

@@ -5,6 +5,7 @@ import { ensureWebhookSecret, ensureWebhookSecrets } from "./secret.js";
 import { pullAndRun, type DeployOutputPhase } from "./pull-and-run.js";
 import { writeDeployLogs } from "./deploy-logs.js";
 import { enqueueDeploy } from "./deploy-queue.js";
+import { readDeploymentEvents } from "./deploy-events.js";
 
 /**
  * Creates an HTTP server that accepts POST on config.path, validates webhook secret,
@@ -131,6 +132,23 @@ export function createShiphookServer(
         res.end(JSON.stringify({ ok: false, error: "Invalid config", details }));
         return;
       }
+    }
+
+    if (req.method === "GET" && (req.url ?? "").split("?")[0] === "/events") {
+      const eventsToken = effectiveConfig.eventsToken.trim();
+      const authHeader = req.headers.authorization;
+      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : "";
+      if (!eventsToken || token !== eventsToken) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+        return;
+      }
+      const events = await readDeploymentEvents(effectiveConfig.repoPath, new URL(req.url ?? "", "http://localhost").searchParams.get("limit"));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ events }));
+      return;
     }
 
     if (req.method !== "POST") {
