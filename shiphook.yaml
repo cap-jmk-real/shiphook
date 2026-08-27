@@ -1,0 +1,9 @@
+# Shiphook's repository-local development configuration.
+# Keep credentials in environment variables, never in this file.
+port: 3141
+repoPath: .
+path: /
+runScript: npm run build
+runTimeoutMs: 1800000
+# SHIPHOOK_SECRET protects POST /.
+# SHIPHOOK_EVENTS_TOKEN protects GET /events.

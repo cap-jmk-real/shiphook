@@ -69,6 +69,21 @@ describe("createShiphookServer", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
+  it("serves the read-only events feed with separate authentication", async () => {
+    const server = createShiphookServer({ ...config, port: 3160 });
+    await server.start();
+    try {
+      expect((await fetch("http://127.0.0.1:3160/events")).status).toBe(401);
+      const response = await fetch("http://127.0.0.1:3160/events?limit=0", {
+        headers: { Authorization: "Bearer events-secret" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ events: [] });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("responds 404 for GET", async () => {
     const server = createShiphookServer({ ...config, port: 3142 });
     await server.start();

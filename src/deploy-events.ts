@@ -27,10 +27,14 @@ function sanitize(value: unknown, max = 500): string | null {
   return value.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, max);
 }
 
-export async function readDeploymentEvents(repoPath: string, rawLimit: string | null): Promise<DeploymentEvent[]> {
+export async function readDeploymentEvents(
+  repoPath: string,
+  rawLimit: string | null
+): Promise<DeploymentEvent[]> {
+  const logsDir = join(repoPath, ".shiphook", "logs");
   let files: string[];
   try {
-    files = (await readdir(join(repoPath, ".shiphook", "logs")))
+    files = (await readdir(logsDir))
       .filter((file) => file.endsWith(".json"))
       .sort()
       .reverse()
@@ -42,10 +46,9 @@ export async function readDeploymentEvents(repoPath: string, rawLimit: string | 
   const events: DeploymentEvent[] = [];
   for (const file of files) {
     try {
-      const raw = JSON.parse(await readFile(join(repoPath, ".shiphook", "logs", file), "utf8")) as Record<string, unknown>;
+      const raw = JSON.parse(await readFile(join(logsDir, file), "utf8")) as Record<string, unknown>;
       const pull = (raw.pull ?? {}) as Record<string, unknown>;
       const run = (raw.run ?? {}) as Record<string, unknown>;
-      const error = sanitize(raw.error);
       events.push({
         id: sanitize(raw.id, 200) ?? file.slice(0, -5),
         status: raw.ok === true ? "success" : "failed",
@@ -55,10 +58,10 @@ export async function readDeploymentEvents(repoPath: string, rawLimit: string | 
         commit: sanitize(raw.commit, 200),
         ref: sanitize(raw.ref, 200),
         repository: sanitize(raw.repository, 300),
-        error: error ?? sanitize(pull.stderr) ?? sanitize(run.stderr),
+        error: sanitize(raw.error) ?? sanitize(pull.stderr) ?? sanitize(run.stderr),
       });
     } catch {
-      // Ignore incomplete or corrupt log files; one bad record must not break the feed.
+      // Ignore a log while it is being written or if it is malformed.
     }
   }
   return events;

@@ -30,9 +30,10 @@ describe("loadConfig", () => {
     delete process.env.SHIPHOOK_RUN_SCRIPT;
     delete process.env.SHIPHOOK_SECRET;
     delete process.env.SHIPHOOK_PATH;
-    const config = loadConfig(process.env);
+    const cwd = join(tmpdir(), "shiphook-config-defaults");
+    const config = loadConfig(process.env, { cwd });
     expect(config.port).toBe(3141);
-    expect(config.repoPath).toBe(process.cwd());
+    expect(config.repoPath).toBe(cwd);
     expect(config.runScript).toBe("npm run deploy");
     expect(config.secret).toBe("");
     expect(config.path).toBe("/");

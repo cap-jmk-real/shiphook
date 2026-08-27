@@ -83,6 +83,15 @@ Each deploy writes files under **`.shiphook/logs/`**:
 
 With **`?format=json`**, the HTTP body includes `log: { id, json, log }` so you can open the matching files.
 
+If `SHIPHOOK_EVENTS_TOKEN` is configured, agents can monitor recent deployments without trigger access:
+
+```bash
+curl -H "Authorization: Bearer $SHIPHOOK_EVENTS_TOKEN" \
+  "https://deploy.example.com/events?limit=20"
+```
+
+The feed is read-only and returns sanitized deployment metadata. It does not expose command output or accept deployment requests.
+
 ---
 
 ## HTTPS (GitHub and most hosts)
@@ -133,6 +142,7 @@ Add **`shiphook.yaml`** (see [shiphook.example.yaml](shiphook.example.yaml)) or 
 | `runScript` / `SHIPHOOK_RUN_SCRIPT` | `npm run deploy` | Command after pull. |
 | `secret` / `SHIPHOOK_SECRET` | (generated) | Required. Omit in YAML and the CLI can create **`.shiphook.secret`**. |
 | `path` / `SHIPHOOK_PATH` | `/` | URL path for the webhook (e.g. `/deploy`). |
+| `eventsToken` / `SHIPHOOK_EVENTS_TOKEN` | disabled | Separate bearer token for read-only `GET /events`. |
 
 After **`git pull`**, Shiphook reloads **repo-local** YAML when the config file lives **inside** the repo. Paths set with **`SHIPHOOK_CONFIG`** to **outside** the repo (e.g. `/etc/...`) are not re-read after pull—use repo-local config if you want each push to pick up YAML changes automatically.
 

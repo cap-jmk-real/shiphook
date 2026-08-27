@@ -9,6 +9,8 @@ runScript: npm run deploy
 runTimeoutMs: 1800000
 # secret: your-webhook-secret   # optional; if omitted, CLI auto-generates and persists one
 path: /
+# Optional read-only token for GET /events.
+# eventsToken: events-read-token
 # On deploy script failure: git reset --hard to pre-pull commit and re-run runScript.
 # rollbackOnFailure: false
 
