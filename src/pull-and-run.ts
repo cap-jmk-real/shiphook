@@ -38,6 +38,10 @@ export interface PullAndRunResult {
   /** `runScript` and timeout actually used for the run phase (after `git pull` reload when YAML exists). */
   runScriptApplied?: string;
   runTimeoutMsApplied?: number;
+  /** Post-pull git metadata for the events feed (best-effort; null when unavailable). */
+  commit?: string | null;
+  ref?: string | null;
+  repository?: string | null;
   rollback?: RollbackResult;
 }
 
@@ -97,6 +101,26 @@ async function getHeadSha(repoPath: string): Promise<string | null> {
   if (!r.success) return null;
   const sha = r.stdout.trim();
   return sha.length > 0 ? sha : null;
+}
+
+/** Best-effort git metadata for the events feed (commit, ref, remote URL). */
+async function getGitMetadata(repoPath: string): Promise<{
+  commit: string | null;
+  ref: string | null;
+  repository: string | null;
+}> {
+  const [commit, ref, repository] = await Promise.all([
+    getHeadSha(repoPath),
+    runGitCommand(repoPath, ["symbolic-ref", "--short", "HEAD"]),
+    runGitCommand(repoPath, ["config", "--get", "remote.origin.url"]),
+  ]);
+  const refName = ref.stdout.trim();
+  const remote = repository.stdout.trim();
+  return {
+    commit,
+    ref: refName.length > 0 ? refName : null,
+    repository: remote.length > 0 ? remote : null,
+  };
 }
 
 async function gitResetHard(
@@ -183,6 +207,11 @@ export async function pullAndRun(
   result.runScriptApplied = runPhase.runScriptApplied;
   result.runTimeoutMsApplied = runPhase.runTimeoutMsApplied;
   result.success = runPhase.exitCode === 0;
+
+  const gitMeta = await getGitMetadata(repoPath);
+  result.commit = gitMeta.commit;
+  result.ref = gitMeta.ref;
+  result.repository = gitMeta.repository;
 
   if (!result.success && rollbackOnFailure && prePullSha) {
     const postPullSha = await getHeadSha(repoPath);

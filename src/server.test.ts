@@ -141,6 +141,10 @@ describe("createShiphookServer", () => {
       };
       expect(onDisk.id).toBe(b.log?.id);
       expect(onDisk.run.stdout.trim()).toBe("ok");
+      // Best-effort git metadata is always recorded (null when unavailable).
+      expect(onDisk).toHaveProperty("commit");
+      expect(onDisk).toHaveProperty("ref");
+      expect(onDisk.repository).toBeNull();
     } finally {
       await server.stop();
     }

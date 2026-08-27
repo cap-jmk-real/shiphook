@@ -151,21 +151,6 @@ export function createShiphookServer(
       return;
     }
 
-    if (req.method === "GET" && (req.url ?? "").split("?")[0] === "/events") {
-      const authHeader = req.headers.authorization;
-      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-      if (!effectiveConfig.eventsToken || token !== effectiveConfig.eventsToken) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
-        return;
-      }
-      const url = new URL(req.url ?? "", "http://localhost");
-      const events = await readDeploymentEvents(effectiveConfig.repoPath, url.searchParams.get("limit"));
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(JSON.stringify({ events }));
-      return;
-    }
-
     if (req.method !== "POST") {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Not found" }));
