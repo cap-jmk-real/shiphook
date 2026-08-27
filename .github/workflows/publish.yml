@@ -27,7 +27,6 @@ jobs:
           node-version: "22"
           cache: "npm"
           registry-url: "https://registry.npmjs.org/"
-          always-auth: false
 
       - name: Install
         run: npm ci
